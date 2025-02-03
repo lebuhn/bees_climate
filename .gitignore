@@ -47,3 +47,8 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Large files
+BeeDataNoiNatBio_PPTCWE.csv
+BeeDataNoiNatBiodiverseResults.csv
+
