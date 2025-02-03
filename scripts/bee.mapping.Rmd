@@ -1,0 +1,36 @@
+---
+title: "PINC Summer 2024"
+author: "Gretchen LeBuhn"
+date: "2024-06-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(mapview)
+library (googledrive)
+```
+
+This next code loads the data.  It pulls data from a box file on Gretchen's box drive so if you want to use the data on google drive, you'll have to re-write this.
+
+I started trying to get it to read from a googledrive but it isn't working yet.  That's what lines 21 and 22 are and why I have the googledrive library up above.
+
+```{r bee_data}
+#temp<-tempfile(fileext = ".zip")
+#download.file("https://docs.google.com/spreadsheets/d/1wzVUV2jaeeRjD-FURbURoKgXTkaMMkcAGMAyJzG6i1I/edit?usp=sharing", temp)
+
+
+
+BeeData <- read.csv("~/Library/CloudStorage/Box-Box/Gilbert_Bee_Data/BiodiverseResults/BeeDataNoiNatSpecimensPerCell.csv", header=TRUE, stringsAsFactors=TRUE)
+```
+
+## Map the data
+Mapping the data
+
+```{r pressure, echo=FALSE}
+mapview(BeeData, xcol = "X.Axis_0.", ycol = "X.Axis_1.", crs = 3310, grid = TRUE)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
