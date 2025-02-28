@@ -1,0 +1,25 @@
+---
+title: "Test_GB"
+format: html
+editor: visual
+---
+
+**Environmental Factors predicting solitary bee distributions**
+
+This project will test a variety of environmental factors to discover whether any of these predict the distribution of solitary bees
+
+```{r}
+library (dplyr)
+#| echo: false
+
+```
+
+**We imported data that was exported by the bio diverse package**
+
+```{r}
+#| echo: false
+bee_data <- read.csv("~/bees_climate/data/BeeDataNoiNatSpecimensPerCell.csv")
+
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
