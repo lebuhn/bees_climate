@@ -1,0 +1,27 @@
+---
+title: "Test_JD1"
+author: "Jessie Davidson"
+format: html
+editor: visual
+---
+
+#### Environmental Factors Predicting Solitary Bee Distributions
+
+This is a project that will test a variety of environmental variables to discover whether any of these predict the distribution of solitary bees.
+
+We begin by downloading and installing libraries to R
+
+```{r}
+#| echo: false
+install.packages('dplyr')
+library(dplyr)
+
+```
+
+We import data that was exported by the Biodiverse package for Gilbert Alacon-Cruz thesis.
+
+```{r}
+#| echo: false
+bee_data <- read.csv('~/Github/bees_climate/data/BeeDataNoiNatSpecimensPerCell.csv')
+
+```
