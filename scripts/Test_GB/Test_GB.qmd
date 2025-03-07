@@ -19,7 +19,15 @@ library (dplyr)
 ```{r}
 #| echo: false
 bee_data <- read.csv("~/bees_climate/data/BeeDataNoiNatSpecimensPerCell.csv")
+library(mapview)
+mapview(bee_data, xcol = "X.Axis_0.", ycol = "X.Axis_1.", crs = 3310, col.regions = "yellow",popup = TRUE, grid = TRUE, cex = 4 ,cluster = TRUE)
+
+
 
 ```
+
+library(mapview)
+
+mapview(bee_data xcol = "X.Axis_0.", ycol = "X.Axis_1.", crs = 3310, grid = TRUE)
 
 The `echo: false` option disables the printing of code (only output is displayed).
