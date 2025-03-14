@@ -52,3 +52,5 @@ rsconnect/
 BeeDataNoiNatBio_PPTCWE.csv
 BeeDataNoiNatBiodiverseResults.csv
 
+# DS store files
+ .DS_Store
