@@ -6,6 +6,7 @@ output: html_document
 ---
 
 # Chunk which checks system for installed packages and installs/activates them.
+
 ```{r}
 # List of packages you want to check and install if missing. Add to this string if you'd like to install additional packages following the previous package with ", " and in double quotations. !Names here much match the case and spelling of the packages you want!
 packages_to_install <- c("ggplot2", "rstudioapi")
@@ -28,48 +29,51 @@ install_and_load_packages(packages_to_install)
 
 ```
 
+# Setting up work space:
 
-# Setting up workspace, Select the whole folder that contains the "Data" folder & this RMD file.
+## Select the working directory.
+
 ```{r}
 dir_path <- selectDirectory()
 setwd(dir_path)
 
 ```
 
+## Use read.csv() to load the data into the work space. Use head() to view the first few lines of the data set.
+
 ```{r}
 beeData <- read.csv('~/Github/bees_climate/data/processed data/BeeDataNoiNatBio_PPTCWE.csv')
 
+head(beeData)
+tail(beeData)
 ```
-
-
 
 #Graphing Bee Data with Climate Data from climateengine.org
 
 ### Species Richness by Average Spring Precipitation (March-October)
+
 ```{r}
-ggplot(data = beeData, aes(x = X_RICHNESS_ALL_, y = PPT)) + 
+ggplot(data = beeData, aes(x = PPT, y = X_RICHNESS_ALL_)) + 
   geom_point(color = "black", pch = 21) + 
   geom_smooth(method = "lm", se = FALSE, color = "maroon") + 
   labs (
     title = "Species Richness and Average Spring Precipitation", 
     subtitle = "Per 15 km cells across California" 
   ) + 
-  xlab("Species Richness (# of species per cell)") + 
-  ylab("Average Precipitation (mm)")
+  xlab("Average Precipitation (mm)") + 
+  ylab("Species Richness (# of species per cell)")
 ```
-
-
 
 ### Corrected Weighted Endimism by Average Spring Precipitation (March-October)
+
 ```{r}
-ggplot(data = beeData, aes(x = CWE, y = PPT)) + 
+ggplot(data = beeData, aes(x = PPT, y = CWE)) + 
   geom_point(color = "black", pch = 21) + 
   geom_smooth(method = "lm", se = FALSE, color = "maroon") + 
   labs (
     title = "Species Richness and Average Spring Precipitation", 
     subtitle = "Per 15 km cells across California" 
   ) + 
-  xlab("Corrected Weighted Endimism (CWE)") + 
-  ylab("Average Precipitation (mm)")
+  xlab("Average Precipitation (mm)") + 
+  ylab("Corrected Weighted Endimism (CWE)")
 ```
-
