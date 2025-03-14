@@ -1,0 +1,75 @@
+---
+title: "BeeMarkdown_JD"
+author: "Kap"
+date: "2024-07-18"
+output: html_document
+---
+
+# Chunk which checks system for installed packages and installs/activates them.
+```{r}
+# List of packages you want to check and install if missing. Add to this string if you'd like to install additional packages following the previous package with ", " and in double quotations. !Names here much match the case and spelling of the packages you want!
+packages_to_install <- c("ggplot2", "rstudioapi")
+# Function to check, install, and load packages
+install_and_load_packages <- function(packages) {
+  # Determine which packages are not installed
+  packages_needed <- packages[!(packages %in% installed.packages()[,"Package"])]
+  # Install missing packages
+  if (length(packages_needed) > 0) {
+    install.packages(packages_needed, dependencies = TRUE)
+    print(paste("Installed packages:", paste(packages_needed, collapse = ", ")))
+  } else {
+    print("All required packages have been installed and activated.")
+  }
+  # Load (attach) the installed packages
+  invisible(lapply(packages, library, character.only = TRUE))
+}
+# Call the function to install and load missing packages
+install_and_load_packages(packages_to_install)
+
+```
+
+
+# Setting up workspace, Select the whole folder that contains the "Data" folder & this RMD file.
+```{r}
+dir_path <- selectDirectory()
+setwd(dir_path)
+
+```
+
+```{r}
+beeData <- read.csv('~/Github/bees_climate/data/processed data/BeeDataNoiNatBio_PPTCWE.csv')
+
+```
+
+
+
+#Graphing Bee Data with Climate Data from climateengine.org
+
+### Species Richness by Average Spring Precipitation (March-October)
+```{r}
+ggplot(data = beeData, aes(x = X_RICHNESS_ALL_, y = PPT)) + 
+  geom_point(color = "black", pch = 21) + 
+  geom_smooth(method = "lm", se = FALSE, color = "maroon") + 
+  labs (
+    title = "Species Richness and Average Spring Precipitation", 
+    subtitle = "Per 15 km cells across California" 
+  ) + 
+  xlab("Species Richness (# of species per cell)") + 
+  ylab("Average Precipitation (mm)")
+```
+
+
+
+### Corrected Weighted Endimism by Average Spring Precipitation (March-October)
+```{r}
+ggplot(data = beeData, aes(x = CWE, y = PPT)) + 
+  geom_point(color = "black", pch = 21) + 
+  geom_smooth(method = "lm", se = FALSE, color = "maroon") + 
+  labs (
+    title = "Species Richness and Average Spring Precipitation", 
+    subtitle = "Per 15 km cells across California" 
+  ) + 
+  xlab("Corrected Weighted Endimism (CWE)") + 
+  ylab("Average Precipitation (mm)")
+```
+
