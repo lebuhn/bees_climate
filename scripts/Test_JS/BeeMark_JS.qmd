@@ -1,0 +1,342 @@
+---
+title: "BeeMark_JS"
+author: "jem!"
+format: html
+---
+
+## Setup
+
+Load required packages.
+
+```{r,message=FALSE,results='hide'}
+reqs <- c('tidyverse','ggplot2','ggpmisc','rstudioapi','car')
+lapply(reqs,require,character.only=TRUE)
+rm(reqs)
+```
+
+Load the data.
+
+```{r,message=FALSE}
+ca_bioclim <- read_csv("../../data/processed/california_bioclim.csv")
+```
+
+There are NAs in the data. This'll remove them:
+
+```{r}
+biocleaned <- ca_bioclim |> 
+  # i'm pretty sure whatever's NA in bio1 is NA across the columns
+  filter(!is.na(bio1))
+
+# but we can double check
+which(is.na(biocleaned))
+```
+
+Okay, cool.
+
+## Assessing collinearity
+
+Climatic factors 1-19 may be collinear. Plotting them against each other helps find which, if any.
+
+```{r,eval=FALSE}
+form <- as.formula(paste(' ~ ',paste0('biocleaned$bio',1:19,collapse=' + ')))
+plot(form, data=biocleaned)
+```
+
+![](images/bio_collinearity.png){fig-align="center"}
+
+A bunch of things are very obviously collinear. Those ones that look like solid lines have correlation coefficients (slope, right) close to 1.
+
+If you wanna view those as numbers, you can run this:
+
+```{r}
+cor_matrix <- cor(biocleaned[, paste0('bio', 1:19)])
+head(cor_matrix)
+```
+
+So the correlation matrix says what plot \[1,2\] in the paired set says, coefficient of 0.94 between bio1 and bio2. They're collinear.
+
+#### VIF: Variance Inflation Factor
+
+VIF is equal to 1/(1-R^2^). The R^2^ here is the regression of one variable against all the others. Essentially, the greater the R^2^, the less variance there is between X~1~ and X~2~, the *more* likely the two are collinear (and the higher the VIF).
+
+The VIF function (from the `car` package) requires a model, so let's make those first. One for CWE and one for richness.
+
+```{r}
+form <- as.formula(paste('X_ENDC_CWE_ ~ ', paste0('bio',1:19,collapse=' + ')))
+cwe_model <- lm(form, data=biocleaned)
+
+form <- as.formula(paste('X_ENDC_RICHNESS_ ~ ', paste0('bio',1:19,collapse=' + ')))
+richness_model <- lm(form, data=biocleaned)
+```
+
+Now getting the VIF values.
+
+```{r,error=TRUE}
+vif(cwe_model)
+```
+
+Oh, weird. That returned an error because there are aliases. Meaning the same factor called by two names.
+
+```{r}
+alias(cwe_model)
+```
+
+Bio17 is linearly dependent on bio15 and bio16. A coefficient of 1 with 15 and -1 with 16 means that Bio17 = Bio15 - Bio16. Alternatively that 15 = 16+17.
+
+And from the metadata...\
+bio15: Precipitation Seasonality (Coefficient of Variation)\
+bio16: Precipitation of Wettest Quarter (mm)\
+bio17: Precipitation of Driest Quarter (mm)
+
+15 is calculated using 16 and 17 to some extent, so let's omit that one.
+
+```{r}
+# so we're going 1:19 excluding 15
+form <- as.formula(paste('X_ENDC_CWE_ ~ ', paste0('bio',(1:19)[-15],collapse=' + ')))
+cwe_model <- lm(form, data=biocleaned)
+
+form <- as.formula(paste('X_ENDC_RICHNESS_ ~ ', paste0('bio',(1:19)[-15],collapse=' + ')))
+richness_model <- lm(form, data=biocleaned)
+```
+
+Now maybe?
+
+```{r}
+vif(cwe_model)
+```
+
+It ran! What am I looking at? We said VIF = 1/(1-R^2^). Higher VIF means less variance from the model.
+
+And these are all huge. Uh... the biggest is bio2 with 5866. The variable biow is inflated by a coefficient of 5866 since it's highly correlated with something else (bio1).
+
+bio1: Annual Mean Temperature (°C \* 10)\
+bio2: Mean Diurnal Range (°C \* 10)
+
+Let's omit that, then. And whatever else we need to until all VIFs are less than 5.
+
+-   **VIF = 1**: No multicollinearity.
+
+-   **1 \< VIF \< 5**: Moderate multicollinearity, usually acceptable.
+
+-   **VIF \> 5**: High multicollinearity, potentially problematic.
+
+-   **VIF \> 10**: Very high multicollinearity, indicating severe issues
+
+```{r}
+form <- as.formula(paste('X_ENDC_CWE_ ~ ', paste0('bio',c(5:7,12,13,18),collapse=' + ')))
+cwe_model <- lm(form, data=biocleaned)
+vif(cwe_model)
+```
+
+After a lot of pruning, 5:6, 12:13, and 18 remain. For CWE.
+
+bio5: Max Temperature of Warmest Month (°C \* 10)\
+bio6: Min Temperature of Coldest Month (°C \* 10)\
+bio7: Temperature Annual Range (°C \* 10)\
+bio12: Annual Precipitation (mm)\
+bio13: Precipitation of Wettest Month (mm)\
+bio18: Precipitation of Warmest Quarter (mm)
+
+Temperature and precipitation.
+
+Let's do that again for richness.
+
+```{r}
+# doing it one at a time before was awful, can we make the computer do it
+
+# AS LONG AS THE HIGHEST GENERATED VIF IS OVER 5
+while (max(vif(richness_model)) > 5) {
+    # pick out the highest one
+    max_vif <- names(which.max(vif(richness_model)))
+    cat("Highest VIF:", max_vif, "=", max(vif(richness_model)), "\n")
+    # remove the highest one
+    form <- as.formula(paste(". ~ . -", max_vif))
+    # update() refits the model with this new formula
+    # . same x var
+    # ~ as explained by
+    # . the same y vars
+    # - excluding the max vif
+    richness_model <- update(richness_model, form)
+}
+
+vif(richness_model)
+```
+
+The remaining variables for richness are... the same as for CWE. Great, okay. I don't know why I expected different, but that works. :)
+
+```{r,include=FALSE}
+rm(max_vif)
+```
+
+#### Re-assessing collinearity
+
+```{r}
+# so there's a function that makes the correlation plots without writing the formula
+pairs(biocleaned[,c(paste0('bio',c(5:7,12,13,18)))])
+```
+
+This is better. 6 and 18 though.
+
+Correlation matrix just to be sure though:
+
+```{r}
+(cor_matrix <- cor(biocleaned[, paste0('bio', c(5:7,12,13,18))]))
+```
+
+Nothing too close to 1. Let's go.
+
+## Checking assumptions.
+
+So now that we have a model, we have to check for normality.
+
+#### CWE Q-Q Plot
+
+```{r}
+# grabbing the residuals for the cwe model
+cwe_res <- rstandard(cwe_model)
+
+qqnorm(cwe_res)
+qqline(cwe_res)
+```
+
+Mostly normal. I think you can do the Shapiro thing to be *sure* though.
+
+```{r}
+shapiro.test(cwe_res)
+```
+
+Yeah, that's tiny.
+
+#### CWE Homoscedasticity
+
+```{r,echo=FALSE}
+cwe_fitted <- fitted(cwe_model)
+
+plot(cwe_fitted, cwe_res, pch = 19,
+     xlab = 'regression fitted values', ylab = 'residual')
+# mark where 0 error is
+abline(h=0)
+```
+
+#### Richness Q-Q Plot
+
+And for richness?
+
+```{r}
+# grabbing the residuals for the cwe model
+richness_res <- rstandard(richness_model)
+
+qqnorm(richness_res)
+qqline(richness_res)
+```
+
+Eeee, less normal than CWE, but I don't think it's that bad.
+
+```{r}
+shapiro.test(richness_res)
+```
+
+Still good, okay.
+
+#### Richness Homoscedasticity
+
+```{r,echo=FALSE}
+richness_fitted <- fitted(richness_model)
+
+plot(richness_fitted, richness_res, pch = 19,
+     xlab = 'regression fitted values', ylab = 'residual')
+abline(h=0)
+```
+
+## Interpreting the regression
+
+#### Endemic species weighted by range size
+
+```{r}
+summary(cwe_model)
+```
+
+##### 5: Maximum temperature
+
+There's a very, very, very small change in weighted endemism as the max temperature increases.
+
+```{r, echo=FALSE}
+ggplot(biocleaned,aes(bio5/10,X_ENDC_CWE_))+
+  geom_point(pch=20,color='black')+
+  geom_abline(slope=-6.81e-05,intercept=3.75e-02,color='orange',linewidth=1)+
+  annotate('text',label='y = -6.81e-05x + 3.75e-02',color='orange3',x=30,y=0.15)+
+  labs(title='Weighted endemism by max temperature', subtitle='per 15km cell across CA',
+       x='Max temperature in the warmest month of the year (ºC)',
+       y='Endemic species weighted by range size')+
+  theme_classic()
+```
+
+#### Number of endemic species
+
+```{r}
+summary(richness_model)
+```
+
+Here, bio5-7 are significant.
+
+##### 5: Maximum temperature
+
+When the max temperature increases by one tenth of a degree Celsius, we lose \~0.09 of a species. +1ºC, -0.9. That's almost a whole species per degree. There is a 'too hot'.
+
+```{r, echo=FALSE}
+ggplot(biocleaned,aes(bio5/10,X_ENDC_RICHNESS_))+
+  geom_point(pch=20,color='black')+
+  geom_abline(slope=-0.87,intercept=29.74,color='orange',linewidth=1)+
+  annotate('text',label='y = -0.87x + 29.74',color='orange3',x=33,y=100)+
+  labs(title='Species richness by max temperature', subtitle='per 15km cell across CA',
+       x='Max temperature in the warmest month of the year (ºC)',
+       y='Number of species')+
+  theme_classic()
+```
+
+##### 6: Minimum temperature
+
+When the minimum temperature increases by one degree Celsius, we see an increase of 15 species.
+
+```{r, echo=FALSE}
+ggplot(biocleaned,aes(bio6/10,X_ENDC_RICHNESS_))+
+  geom_jitter(pch=20)+
+  geom_abline(slope=14.56,intercept=29.74,color='orange',linewidth=1)+
+  annotate('text',label='y = 14.56x + 29.74',color='orange3',x=1.7,y=200)+
+  labs(title='Species richness by min temperature', subtitle='per 15km cell across CA\n(points jittered to visualize density)',
+       x='Min temperature in the coldest month of the year (ºC)',
+       y='Number of species')+
+  theme_classic()
+```
+
+This may be a proportional increase, hold on.
+
+```{r,echo=FALSE}
+# factor will group by unique instances of bio6
+ggplot(biocleaned,aes(x=factor(bio6/10),X_ENDC_RICHNESS_))+
+  geom_boxplot()+
+  stat_summary(fun=mean, geom='point',color='firebrick',size=0.5)+
+  stat_summary(fun=mean, geom = 'line', linetype = 'solid', linewidth=0.5,
+               color = 'firebrick', aes(group = 1))+
+  geom_abline(slope=1.456,intercept=29.74,color='orange',linewidth=1)+
+  annotate('text',label='y = 14.56x + 29.74',color='orange3',x=17,y=200)+
+  labs(title='Species richness by min temperature', subtitle='per 15km cell across CA',
+       x='Min temperature in the coldest month of the year (ºC)',
+       y='Number of species')+
+  theme_classic()
+```
+
+##### 7: Temperature range
+
+When the temperature range increases by a degree, we see an increase of 5 species.
+
+```{r, echo=FALSE}
+ggplot(biocleaned,aes(bio7/10,X_ENDC_RICHNESS_))+
+  geom_point(pch=20)+
+  geom_abline(slope=5.05,intercept=29.74,color='orange',linewidth=1)+
+  annotate('text',label='y = 5.05x + 29.74',color='orange3',x=3,y=100)+
+  labs(title='Species richness by temperature range', subtitle='per 15km cell across CA',
+       x='Temperature annual range (ºC)',
+       y='Number of species')+
+  theme_classic()
+```

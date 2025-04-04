@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.5.57">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="jem!">
+
+<title>BeeMark_JS</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="BeeMark_JS_files/libs/clipboard/clipboard.min.js"></script>
+<script src="BeeMark_JS_files/libs/quarto-html/quarto.js"></script>
+<script src="BeeMark_JS_files/libs/quarto-html/popper.min.js"></script>
+<script src="BeeMark_JS_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="BeeMark_JS_files/libs/quarto-html/anchor.min.js"></script>
+<link href="BeeMark_JS_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="BeeMark_JS_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="BeeMark_JS_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="BeeMark_JS_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="BeeMark_JS_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">BeeMark_JS</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>jem! </p>
+          </div>
+  </div>
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="setup" class="level2">
+<h2 class="anchored" data-anchor-id="setup">Setup</h2>
+<p>Load required packages.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>reqs <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">'tidyverse'</span>,<span class="st">'ggplot2'</span>,<span class="st">'ggpmisc'</span>,<span class="st">'rstudioapi'</span>,<span class="st">'car'</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">lapply</span>(reqs,require,<span class="at">character.only=</span><span class="cn">TRUE</span>)</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">rm</span>(reqs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Load the data, wherever it is – go find it.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>ca_bioclim <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">"../../data/california_bioclim.csv"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>There are NAs in the data. This’ll remove them:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>biocleaned <span class="ot">&lt;-</span> ca_bioclim <span class="sc">|&gt;</span> </span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="co"># i'm pretty sure whatever's NA in bio1 is NA across the columns</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(bio1))</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="co"># but we can double check</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="fu">which</span>(<span class="fu">is.na</span>(biocleaned))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>integer(0)</code></pre>
+</div>
+</div>
+<p>Okay, cool.</p>
+</section>
+<section id="assessing-collinearity" class="level2">
+<h2 class="anchored" data-anchor-id="assessing-collinearity">Assessing collinearity</h2>
+<p>Climatic factors 1-19 may be collinear. Plotting them against each other helps find which, if any.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">' ~ '</span>,<span class="fu">paste0</span>(<span class="st">'biocleaned$bio'</span>,<span class="dv">1</span><span class="sc">:</span><span class="dv">19</span>,<span class="at">collapse=</span><span class="st">' + '</span>)))</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(form, <span class="at">data=</span>biocleaned)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="images/bio_collinearity.png" class="img-fluid quarto-figure quarto-figure-center figure-img"></p>
+</figure>
+</div>
+<p>A bunch of things are very obviously collinear. Those ones that look like solid lines have correlation coefficients (slope, right) close to 1.</p>
+<p>If you wanna view those as numbers, you can run this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>cor_matrix <span class="ot">&lt;-</span> <span class="fu">cor</span>(biocleaned[, <span class="fu">paste0</span>(<span class="st">'bio'</span>, <span class="dv">1</span><span class="sc">:</span><span class="dv">19</span>)])</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(cor_matrix)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           bio1       bio2       bio3       bio4       bio5       bio6
+bio1  1.0000000  0.9387533  0.9228316 -0.5555137 -0.4967072 -0.8521213
+bio2  0.9387533  1.0000000  0.7381476 -0.6400837 -0.6093176 -0.7040194
+bio3  0.9228316  0.7381476  1.0000000 -0.3631964 -0.2825238 -0.8863671
+bio4 -0.5555137 -0.6400837 -0.3631964  1.0000000  0.9896912  0.3939929
+bio5 -0.4967072 -0.6093176 -0.2825238  0.9896912  1.0000000  0.3059086
+bio6 -0.8521213 -0.7040194 -0.8863671  0.3939929  0.3059086  1.0000000
+              bio7       bio8       bio9      bio10      bio11       bio12
+bio1 -0.0009730101 -0.5041291 -0.8218393 -0.6379981 -0.5057455  0.17080491
+bio2 -0.2597472893 -0.6165370 -0.6970155 -0.5137123 -0.6162079  0.37677930
+bio3  0.2873736264 -0.2880251 -0.8292442 -0.6530972 -0.2921550 -0.08678061
+bio4  0.3859301925  0.9929993  0.5959624  0.5390159  0.9919852 -0.38456263
+bio5  0.4786507680  0.9979297  0.4990618  0.4481728  0.9987969 -0.41264737
+bio6 -0.3607995098  0.3127534  0.9198814  0.7896259  0.3115194 -0.03095412
+           bio13       bio14      bio15      bio16       bio17      bio18
+bio1 -0.06969512  0.21784666  0.8381385  0.8332563  0.18948234  0.8562097
+bio2 -0.37771230  0.53835630  0.9606894  0.6070894  0.49800644  0.7594753
+bio3  0.28115611 -0.17079885  0.5805486  0.9682933 -0.18436807  0.8463224
+bio4  0.32980388 -0.47170126 -0.6199588 -0.1908733 -0.48348957 -0.4108690
+bio5  0.39000944 -0.52759496 -0.6051133 -0.1068350 -0.53603766 -0.3580320
+bio6 -0.19412845  0.07780463 -0.6008529 -0.8518176  0.06949991 -0.7172992
+          bio19
+bio1  0.8885145
+bio2  0.8870159
+bio3  0.7519241
+bio4 -0.5122055
+bio5 -0.4633161
+bio6 -0.7851913</code></pre>
+</div>
+</div>
+<p>So the correlation matrix says what plot [1,2] in the paired set says, coefficient of 0.94 between bio1 and bio2. They’re collinear.</p>
+<section id="vif-variance-inflation-factor" class="level4">
+<h4 class="anchored" data-anchor-id="vif-variance-inflation-factor">VIF: Variance Inflation Factor</h4>
+<p>VIF is equal to 1/(1-R<sup>2</sup>). The R<sup>2</sup> here is the regression of one variable against all the others. Essentially, the greater the R<sup>2</sup>, the less variance there is between X<sub>1</sub> and X<sub>2</sub>, the <em>more</em> likely the two are collinear (and the higher the VIF).</p>
+<p>The VIF function (from the <code>car</code> package) requires a model, so let’s make those first. One for CWE and one for richness.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">'X_ENDC_CWE_ ~ '</span>, <span class="fu">paste0</span>(<span class="st">'bio'</span>,<span class="dv">1</span><span class="sc">:</span><span class="dv">19</span>,<span class="at">collapse=</span><span class="st">' + '</span>)))</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>cwe_model <span class="ot">&lt;-</span> <span class="fu">lm</span>(form, <span class="at">data=</span>biocleaned)</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">'X_ENDC_RICHNESS_ ~ '</span>, <span class="fu">paste0</span>(<span class="st">'bio'</span>,<span class="dv">1</span><span class="sc">:</span><span class="dv">19</span>,<span class="at">collapse=</span><span class="st">' + '</span>)))</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>richness_model <span class="ot">&lt;-</span> <span class="fu">lm</span>(form, <span class="at">data=</span>biocleaned)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now getting the VIF values.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">vif</span>(cwe_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-error">
+<pre><code>Error in vif.default(cwe_model): there are aliased coefficients in the model</code></pre>
+</div>
+</div>
+<p>Oh, weird. That returned an error because there are aliases. Meaning the same factor called by two names.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">alias</span>(cwe_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Model :
+X_ENDC_CWE_ ~ bio1 + bio2 + bio3 + bio4 + bio5 + bio6 + bio7 + 
+    bio8 + bio9 + bio10 + bio11 + bio12 + bio13 + bio14 + bio15 + 
+    bio16 + bio17 + bio18 + bio19
+
+Complete :
+      (Intercept) bio1 bio2 bio3 bio4 bio5 bio6 bio7 bio8 bio9 bio10 bio11
+bio17  0           0    0    0    0    0    0    0    0    0    0     0   
+      bio12 bio13 bio14 bio15 bio16 bio18 bio19
+bio17  0     0     0     1    -1     0     0   </code></pre>
+</div>
+</div>
+<p>Bio17 is linearly dependent on bio15 and bio16. A coefficient of 1 with 15 and -1 with 16 means that Bio17 = Bio15 - Bio16. Alternatively that 15 = 16+17.</p>
+<p>And from the metadata…<br>
+bio15: Precipitation Seasonality (Coefficient of Variation)<br>
+bio16: Precipitation of Wettest Quarter (mm)<br>
+bio17: Precipitation of Driest Quarter (mm)</p>
+<p>15 is calculated using 16 and 17 to some extent, so let’s omit that one.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="co"># so we're going 1:19 excluding 15</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">'X_ENDC_CWE_ ~ '</span>, <span class="fu">paste0</span>(<span class="st">'bio'</span>,(<span class="dv">1</span><span class="sc">:</span><span class="dv">19</span>)[<span class="sc">-</span><span class="dv">15</span>],<span class="at">collapse=</span><span class="st">' + '</span>)))</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>cwe_model <span class="ot">&lt;-</span> <span class="fu">lm</span>(form, <span class="at">data=</span>biocleaned)</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">'X_ENDC_RICHNESS_ ~ '</span>, <span class="fu">paste0</span>(<span class="st">'bio'</span>,(<span class="dv">1</span><span class="sc">:</span><span class="dv">19</span>)[<span class="sc">-</span><span class="dv">15</span>],<span class="at">collapse=</span><span class="st">' + '</span>)))</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>richness_model <span class="ot">&lt;-</span> <span class="fu">lm</span>(form, <span class="at">data=</span>biocleaned)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now maybe?</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">vif</span>(cwe_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>       bio1        bio2        bio3        bio4        bio5        bio6 
+ 776.615104 5866.026045 3359.513892  661.461119  565.783222   17.717827 
+       bio7        bio8        bio9       bio10       bio11       bio12 
+  13.216065 1017.205747   36.232867   14.255377 1329.864377   97.527589 
+      bio13       bio14       bio16       bio17       bio18       bio19 
+  42.246403 1901.358158  164.721961  603.774801    4.886124   23.898703 </code></pre>
+</div>
+</div>
+<p>It ran! What am I looking at? We said VIF = 1/(1-R<sup>2</sup>). Higher VIF means less variance from the model.</p>
+<p>And these are all huge. Uh… the biggest is bio2 with 5866. The variable biow is inflated by a coefficient of 5866 since it’s highly correlated with something else (bio1).</p>
+<p>bio1: Annual Mean Temperature (°C * 10)<br>
+bio2: Mean Diurnal Range (°C * 10)</p>
+<p>Let’s omit that, then. And whatever else we need to until all VIFs are less than 5.</p>
+<ul>
+<li><p><strong>VIF = 1</strong>: No multicollinearity.</p></li>
+<li><p><strong>1 &lt; VIF &lt; 5</strong>: Moderate multicollinearity, usually acceptable.</p></li>
+<li><p><strong>VIF &gt; 5</strong>: High multicollinearity, potentially problematic.</p></li>
+<li><p><strong>VIF &gt; 10</strong>: Very high multicollinearity, indicating severe issues</p></li>
+</ul>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">'X_ENDC_CWE_ ~ '</span>, <span class="fu">paste0</span>(<span class="st">'bio'</span>,<span class="fu">c</span>(<span class="dv">5</span><span class="sc">:</span><span class="dv">7</span>,<span class="dv">12</span>,<span class="dv">13</span>,<span class="dv">18</span>),<span class="at">collapse=</span><span class="st">' + '</span>)))</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>cwe_model <span class="ot">&lt;-</span> <span class="fu">lm</span>(form, <span class="at">data=</span>biocleaned)</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="fu">vif</span>(cwe_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    bio5     bio6     bio7    bio12    bio13    bio18 
+2.067894 3.577167 3.217336 1.350621 1.825745 2.544625 </code></pre>
+</div>
+</div>
+<p>After a lot of pruning, 5:6, 12:13, and 18 remain. For CWE.</p>
+<p>bio5: Max Temperature of Warmest Month (°C * 10)<br>
+bio6: Min Temperature of Coldest Month (°C * 10)<br>
+bio7: Temperature Annual Range (°C * 10)<br>
+bio12: Annual Precipitation (mm)<br>
+bio13: Precipitation of Wettest Month (mm)<br>
+bio18: Precipitation of Warmest Quarter (mm)</p>
+<p>Temperature and precipitation.</p>
+<p>Let’s do that again for richness.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co"># doing it one at a time before was awful, can we make the computer do it</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="co"># AS LONG AS THE HIGHEST GENERATED VIF IS OVER 5</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="cf">while</span> (<span class="fu">max</span>(<span class="fu">vif</span>(richness_model)) <span class="sc">&gt;</span> <span class="dv">5</span>) {</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># pick out the highest one</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>    max_vif <span class="ot">&lt;-</span> <span class="fu">names</span>(<span class="fu">which.max</span>(<span class="fu">vif</span>(richness_model)))</span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">cat</span>(<span class="st">"Highest VIF:"</span>, max_vif, <span class="st">"="</span>, <span class="fu">max</span>(<span class="fu">vif</span>(richness_model)), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    <span class="co"># remove the highest one</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    form <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">". ~ . -"</span>, max_vif))</span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>    <span class="co"># update() refits the model with this new formula</span></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>    <span class="co"># . same x var</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>    <span class="co"># ~ as explained by</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>    <span class="co"># . the same y vars</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>    <span class="co"># - excluding the max vif</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>    richness_model <span class="ot">&lt;-</span> <span class="fu">update</span>(richness_model, form)</span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Highest VIF: bio2 = 5866.026 
+Highest VIF: bio11 = 1282.79 
+Highest VIF: bio8 = 830.6972 
+Highest VIF: bio1 = 572.2757 
+Highest VIF: bio17 = 511.5304 
+Highest VIF: bio4 = 225.0083 
+Highest VIF: bio16 = 125.6904 
+Highest VIF: bio14 = 61.10783 
+Highest VIF: bio9 = 23.32158 
+Highest VIF: bio3 = 19.03651 
+Highest VIF: bio19 = 7.353515 
+Highest VIF: bio10 = 5.471308 </code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">vif</span>(richness_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    bio5     bio6     bio7    bio12    bio13    bio18 
+2.067894 3.577167 3.217336 1.350621 1.825745 2.544625 </code></pre>
+</div>
+</div>
+<p>The remaining variables for richness are… the same as for CWE. Great, okay. I don’t know why I expected different, but that works. :)</p>
+</section>
+<section id="re-assessing-collinearity" class="level4">
+<h4 class="anchored" data-anchor-id="re-assessing-collinearity">Re-assessing collinearity</h4>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># so there's a function that makes the correlation plots without writing the formula</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="fu">pairs</span>(biocleaned[,<span class="fu">c</span>(<span class="fu">paste0</span>(<span class="st">'bio'</span>,<span class="fu">c</span>(<span class="dv">5</span><span class="sc">:</span><span class="dv">7</span>,<span class="dv">12</span>,<span class="dv">13</span>,<span class="dv">18</span>)))])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-14-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>AND THERE ARE NO STRAIGHT LINES.</p>
+<p>Correlation matrix just to be sure though:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>(cor_matrix <span class="ot">&lt;-</span> <span class="fu">cor</span>(biocleaned[, <span class="fu">paste0</span>(<span class="st">'bio'</span>, <span class="fu">c</span>(<span class="dv">5</span><span class="sc">:</span><span class="dv">7</span>,<span class="dv">12</span>,<span class="dv">13</span>,<span class="dv">18</span>))]))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            bio5        bio6        bio7        bio12       bio13        bio18
+bio5   1.0000000  0.30590859  0.47865077 -0.412647374  0.39000944 -0.358032048
+bio6   0.3059086  1.00000000 -0.36079951 -0.030954123 -0.19412845 -0.717299184
+bio7   0.4786508 -0.36079951  1.00000000 -0.392274390  0.65709487  0.021861538
+bio12 -0.4126474 -0.03095412 -0.39227439  1.000000000 -0.32866438  0.002192902
+bio13  0.3900094 -0.19412845  0.65709487 -0.328664378  1.00000000  0.052628191
+bio18 -0.3580320 -0.71729918  0.02186154  0.002192902  0.05262819  1.000000000</code></pre>
+</div>
+</div>
+<p>Nothing too close to 1. Let’s go.</p>
+</section>
+</section>
+<section id="checking-assumptions." class="level2">
+<h2 class="anchored" data-anchor-id="checking-assumptions.">Checking assumptions.</h2>
+<p>So now that we have a model, we have to check for normality.</p>
+<section id="cwe-q-q-plot" class="level4">
+<h4 class="anchored" data-anchor-id="cwe-q-q-plot">CWE Q-Q Plot</h4>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="co"># grabbing the residuals for the cwe model</span></span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>cwe_res <span class="ot">&lt;-</span> <span class="fu">rstandard</span>(cwe_model)</span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a><span class="fu">qqnorm</span>(cwe_res)</span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a><span class="fu">qqline</span>(cwe_res)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-16-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>Mostly normal. I think you can do the Shapiro thing to be <em>sure</em> though.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">shapiro.test</span>(cwe_res)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+    Shapiro-Wilk normality test
+
+data:  cwe_res
+W = 0.43623, p-value &lt; 2.2e-16</code></pre>
+</div>
+</div>
+<p>Yeah, that’s tiny.</p>
+</section>
+<section id="cwe-homoscedasticity" class="level4">
+<h4 class="anchored" data-anchor-id="cwe-homoscedasticity">CWE Homoscedasticity</h4>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-18-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="richness-q-q-plot" class="level4">
+<h4 class="anchored" data-anchor-id="richness-q-q-plot">Richness Q-Q Plot</h4>
+<p>And for richness?</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="co"># grabbing the residuals for the cwe model</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>richness_res <span class="ot">&lt;-</span> <span class="fu">rstandard</span>(richness_model)</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a><span class="fu">qqnorm</span>(richness_res)</span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a><span class="fu">qqline</span>(richness_res)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-19-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>Eeee, less normal than CWE, but I don’t think it’s that bad.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="fu">shapiro.test</span>(richness_res)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+    Shapiro-Wilk normality test
+
+data:  richness_res
+W = 0.70374, p-value &lt; 2.2e-16</code></pre>
+</div>
+</div>
+<p>Still good, okay.</p>
+</section>
+<section id="richness-homoscedasticity" class="level4">
+<h4 class="anchored" data-anchor-id="richness-homoscedasticity">Richness Homoscedasticity</h4>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-21-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="interpreting-the-regression" class="level2">
+<h2 class="anchored" data-anchor-id="interpreting-the-regression">Interpreting the regression</h2>
+<section id="endemic-species-weighted-by-range-size" class="level4">
+<h4 class="anchored" data-anchor-id="endemic-species-weighted-by-range-size">Endemic species weighted by range size</h4>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(cwe_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:
+lm(formula = form, data = biocleaned)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.04511 -0.01749 -0.00829  0.00579  0.96581 
+
+Coefficients:
+              Estimate Std. Error t value Pr(&gt;|t|)    
+(Intercept)  3.751e-02  1.775e-02   2.113 0.034748 *  
+bio5        -6.805e-05  2.013e-05  -3.380 0.000742 ***
+bio6         7.225e-05  5.079e-04   0.142 0.886903    
+bio7        -1.620e-04  1.128e-04  -1.436 0.151130    
+bio12        8.683e-04  6.455e-04   1.345 0.178790    
+bio13       -4.892e-05  2.720e-04  -0.180 0.857315    
+bio18        2.197e-04  2.543e-04   0.864 0.387936    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Residual standard error: 0.04395 on 1672 degrees of freedom
+Multiple R-squared:  0.03571,   Adjusted R-squared:  0.03225 
+F-statistic: 10.32 on 6 and 1672 DF,  p-value: 2.99e-11</code></pre>
+</div>
+</div>
+<section id="maximum-temperature" class="level5">
+<h5 class="anchored" data-anchor-id="maximum-temperature">5: Maximum temperature</h5>
+<p>There’s a very, very, very small change in weighted endemism as the max temperature increases.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-23-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="number-of-endemic-species" class="level4">
+<h4 class="anchored" data-anchor-id="number-of-endemic-species">Number of endemic species</h4>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(richness_model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:
+lm(formula = X_ENDC_RICHNESS_ ~ bio5 + bio6 + bio7 + bio12 + 
+    bio13 + bio18, data = biocleaned)
+
+Residuals:
+   Min     1Q Median     3Q    Max 
+-45.69 -21.58 -13.27   6.13 373.64 
+
+Coefficients:
+             Estimate Std. Error t value Pr(&gt;|t|)    
+(Intercept) -29.74410   15.89632  -1.871  0.06150 .  
+bio5         -0.08683    0.01803  -4.816  1.6e-06 ***
+bio6          1.45626    0.45487   3.202  0.00139 ** 
+bio7          0.50546    0.10100   5.004  6.2e-07 ***
+bio12         0.12132    0.57808   0.210  0.83379    
+bio13         0.45183    0.24361   1.855  0.06381 .  
+bio18         0.13340    0.22778   0.586  0.55818    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Residual standard error: 39.36 on 1672 degrees of freedom
+Multiple R-squared:  0.03155,   Adjusted R-squared:  0.02808 
+F-statistic: 9.079 on 6 and 1672 DF,  p-value: 8.604e-10</code></pre>
+</div>
+</div>
+<p>Here, bio5-7 are significant.</p>
+<section id="maximum-temperature-1" class="level5">
+<h5 class="anchored" data-anchor-id="maximum-temperature-1">5: Maximum temperature</h5>
+<p>When the max temperature increases by one tenth of a degree Celsius, we lose ~0.09 of a species. +1ºC, -0.9. That’s almost a whole species per degree. There is a ‘too hot’.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-25-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="minimum-temperature" class="level5">
+<h5 class="anchored" data-anchor-id="minimum-temperature">6: Minimum temperature</h5>
+<p>When the minimum temperature increases by one degree Celsius, we see an increase of 15 species.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-26-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>This may be a proportional increase, hold on.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-27-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="temperature-range" class="level5">
+<h5 class="anchored" data-anchor-id="temperature-range">7: Temperature range</h5>
+<p>When the temperature range increases by a degree, we see an increase of 5 species.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="BeeMark_JS_files/figure-html/unnamed-chunk-28-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    // For code content inside modals, clipBoardJS needs to be initialized with a container option
+    // TODO: Check when it could be a function (https://github.com/zenorocha/clipboard.js/issues/860)
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      // TODO in 1.5, we should make sure this works without a callout special case
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
