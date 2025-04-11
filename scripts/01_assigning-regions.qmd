@@ -3,7 +3,7 @@ title: "Assigning ecoregions"
 author: "jem!"
 format:
   html:
-    self-contained: false
+    self-contained: true
     toc: true
     toc-depth: 5
     theme: sandstone
