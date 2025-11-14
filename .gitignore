@@ -54,3 +54,10 @@ BeeDataNoiNatBiodiverseResults.csv
 
 # DS store files
  .DS_Store
+ 
+ #Data files
+data/
+
+#older scripts and output files from quarto
+scripts/*_files/
+scripts/older/
