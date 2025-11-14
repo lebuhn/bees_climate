@@ -56,7 +56,13 @@ BeeDataNoiNatBiodiverseResults.csv
  .DS_Store
  
  #Data files
+<<<<<<< HEAD
 data/
+=======
+data/working/
+data/processed/
+data/PRISM_ppt_provisional_4kmM3_2024_bil/
+>>>>>>> d6b6bee53857b9e4d0f6abab52adf98f196f2b9d
 
 #older scripts and output files from quarto
 scripts/*_files/
