@@ -1,0 +1,54 @@
+---
+title: "data_wrangling"
+format: html
+editor: visual
+---
+
+## This is a file that imports data 
+
+```{r}
+# Quarto/R setup for private Google Drive access
+
+library(googledrive)
+library(readr)
+library(dplyr)
+
+# Point knitting session to the cached token and your account
+options(
+  gargle_oauth_cache = ".secrets",
+  gargle_oauth_email = "lebuhn@sfsu.EDU"
+)
+
+# Authenticate using the cached token (no browser prompt during knit)
+drive_auth(cache = ".secrets")
+
+# OPTIONAL sanity check: should print your Google user
+ print(googledrive::drive_user())
+```
+
+```{r}
+
+# Locate folder
+folder <- drive_get("github_data/bees_climate_data/processed")
+
+# List all files inside
+files <- drive_ls(folder)
+
+# Show files
+print(files$name)
+
+# Ask which file you want
+choice <- readline(prompt = "Enter the exact file name you want to import: ")
+
+# Match the chosen file
+file <- files %>% filter(name == choice)
+
+# Download to a temporary file and read it
+tmp <- tempfile(fileext = ".csv")
+drive_download(file, path = tmp, overwrite = TRUE)
+
+data <- read_csv(tmp)
+head(data)
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
