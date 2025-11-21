@@ -1,0 +1,202 @@
+---
+title: "Assigning ecoregions"
+author: "jem! and gretchen"
+format:
+  html:
+    self-contained: true
+    toc: true
+    toc-depth: 5
+    theme: sandstone
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+library(googledrive)
+library(readr)
+library(dplyr)
+library(sf)
+library(tidyverse)
+
+# Cache OAuth locally so you only auth once on this machine
+options(gargle_oauth_cache = ".secrets", gargle_oauth_email = NA_character_)
+drive_auth(cache = ".secrets")
+```
+
+------------------------------------------------------------------------
+
+Load data from Google Drive
+
+```{r}
+#| panel: input
+
+library(googledrive)
+library(readr)
+library(sf)
+library(dplyr)
+
+
+## 1) CSV
+csv_item <- drive_ls(path = "bees_climate_data/processed") |>
+  filter(name == "california_bioclim.csv")                 
+
+stopifnot(nrow(csv_item) == 1)
+csv_path <- tempfile(fileext = ".csv")
+drive_download(csv_item, path = csv_path, overwrite = TRUE)
+ca.bioclim <- read_csv(csv_path, show_col_types = FALSE)
+
+## 2) Shapefile (download all parts)
+eco_items <- drive_ls(path = "data/epa_shapes") |>
+  filter(startsWith(name, "ca_eco_l3"))                    
+
+# Expect at least shp, shx, dbf, prj
+stopifnot(any(endsWith(eco_items$name, ".shp")),
+          any(endsWith(eco_items$name, ".dbf")),
+          any(endsWith(eco_items$name, ".shx")),
+          any(endsWith(eco_items$name, ".prj")))
+
+eco_dir <- tempfile("ca_eco_l3_"); dir.create(eco_dir)
+for (i in seq_len(nrow(eco_items))) {
+  drive_download(eco_items[i, ], path = file.path(eco_dir, eco_items$name[i]), overwrite = TRUE)
+}
+
+shp_path <- list.files(eco_dir, pattern = "\\.shp$", full.names = TRUE, ignore.case = TRUE)
+stopifnot(length(shp_path) == 1)
+ecoregions <- st_read(shp_path, quiet = TRUE)
+
+```
+
+------------------------------------------------------------------------
+
+## Cleaning the bioclim data
+
+```{r}
+#| panel: input
+
+bio.data <- ca.bioclim |>
+  # easier col names
+  rename(x.axis = X_Axis_0_, y.axis = X_Axis_1_, cwe = X_ENDC_CWE_, richness = X_ENDC_RICHNESS_) |> 
+  # picking out the axes, dependent vars, and predictors
+  select(x.axis, y.axis, cwe, richness, starts_with('bio')) |> 
+  # removing rows that contain NAs
+  drop_na()
+```
+
+------------------------------------------------------------------------
+
+## Assigning regions to the observations
+
+### Translating the `x.axis` and `y.axis` into coordinates
+
+```{r}
+#| panel: input
+
+# turn it into a simple feature object -- crs 3310 is the CA albers projection
+bio.data <- st_as_sf(bio.data, coords = c("x.axis", "y.axis"), crs = 3310)
+```
+
+```{r}
+#| panel: input
+#| echo: false
+
+(ggplot(bio.data, aes(color = richness)) +
+  geom_sf())
+```
+
+### Joining it with the ecoregion data
+
+```{r}
+#| panel: input
+
+# making sure the ecoregions are mapped to the same projection
+ecoregions <- st_transform(ecoregions, crs = 3310) |> 
+  # we want the level names, and the geometry
+  select(NA_L3NAME, NA_L2NAME, NA_L1NAME, geometry)
+
+# new set that joins our biodata to regions where the geometries intersect
+# regional.data <- st_join(bio.data, ecoregions, join = st_intersects) |> 
+#   select(1:21, NA_L3NAME, NA_L2NAME, NA_L1NAME) |> 
+#   rename(L3.name = NA_L3NAME, L2.name = NA_L2NAME, L1.name = NA_L1NAME)
+
+# not everything falls into a region, but there's a function that assigns NAs to nearest neighbors
+
+# ## grab the rows are unnamed
+# missing.region <- regional.data |> 
+#   # finding the NAs in each level
+#   filter(is.na(L1.name) | is.na(L2.name) | is.na(L3.name))
+# 
+# ## if they exist
+# if (nrow(missing.region) > 0) {
+#   # join them to the ecoregion set by nearest feature instead of intersections
+#   nearest.region <- st_join(missing.region, ecoregions, join = st_nearest_feature) |> 
+#     select(1:21, NA_L3NAME, NA_L2NAME, NA_L1NAME) |> 
+#     rename(L3.name = NA_L3NAME, L2.name = NA_L2NAME, L1.name = NA_L1NAME)
+#   
+#   # go back to the regional data
+#   regional.data <- regional.data |> 
+#     # remove the missing.region rows
+#     filter(!(is.na(L1.name) | is.na(L2.name) | is.na(L3.name))) |> 
+#     # add the nearest.region rows
+#     bind_rows(nearest.region)
+# }
+
+# this is better lol
+regional.data <- st_join(bio.data, ecoregions, join = st_nearest_feature) |> 
+  select(1:21, NA_L3NAME, NA_L2NAME, NA_L1NAME) |> 
+  rename(L3.name = NA_L3NAME, L2.name = NA_L2NAME, L1.name = NA_L1NAME)
+```
+
+------------------------------------------------------------------------
+
+## Plots
+
+```{r}
+#| panel: input
+
+# just for me to feel better
+regional.data <- regional.data |> 
+  # standardize capitalization across L.names
+  mutate(across(where(is.character), str_to_sentence)) |> 
+  # move them into 1,2,3 order
+  relocate(L1.name, .before = L2.name) |> 
+  relocate(L3.name, .after = L2.name)
+```
+
+
+```{r}
+#| panel: input
+
+levels <- regional.data |> 
+  select(starts_with('L')) |>
+  st_drop_geometry() |> 
+  names()
+
+for (level in levels){
+  print(
+    ggplot(regional.data, aes(color = .data[[level]]))+
+      geom_sf()+
+      labs(title = paste('Cells by',
+                         if (level == 'L1.name'){'level 1'}
+                         else if (level == 'L2.name'){'level 2'}
+                         else if (level == 'L3.name'){'level 3'},
+                         'designation')
+      )+
+      theme_minimal()+
+      theme(legend.title = element_blank())
+  )
+}
+```
+
+
+------------------------------------------------------------------------
+
+## Saving the processed data
+
+I think this is fine for now.
+
+```{r}
+# this is a plain csv
+write_csv(regional.data, '../data/working/eco.data.csv')
+# this preserves the spatial data for mapping
+st_write(regional.data, "../data/working/eco.data.gpkg", append = FALSE) # false overwrites instead of appends
+```
