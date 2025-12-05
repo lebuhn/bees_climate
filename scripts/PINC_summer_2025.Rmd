@@ -1,0 +1,580 @@
+---
+title: "PINC_final"
+author: "Najeeba Shaikh"
+date: "2025-07-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library("readr")
+library("dplyr")
+library("ggplot2")
+library("sf")
+library("tidyr")
+library("mapview")
+library("viridis")
+library("viridisLite")
+library("vegan")
+library("MuMIn")
+
+ncld_detailed_percentage <- read.csv("~/Desktop/PINC_Climate_Change/Project 2/nlcd_2001_detailed_percentages.csv")
+
+colnames(ncld_detailed_percentage) <- c(
+  "grid_cell",                         # grid_cell (assuming it's the first column)
+  "Open_Water",                        # 11
+  "Developed_Open_Space",              # 21
+  "Developed_Low_Intensity",           # 22
+  "Developed_Medium_Intensity",        # 23
+  "Developed_High_Intensity",          # 24
+  "Barren_Land_Rock_Sand_Clay",        # 31
+  "Deciduous_Forest",                  # 41
+  "Evergreen_Forest",                  # 42
+  "Mixed_Forest",                      # 43
+  "Shrub_Scrub",                       # 52
+  "Grassland_Herbaceous",              # 71
+  "Pasture_Hay",                       # 81
+  "Cultivated_Crops",                  # 82
+  "Woody_Wetlands",                    # 90
+  "Emergent_Herbaceous_Wetlands"       # 95
+)
+
+read.csv("~/Desktop/PINC_Climate_Change/Project 2/california_bioclim.csv")
+bio_clim <- read.csv("~/Desktop/PINC_Climate_Change/Project 2/california_bioclim.csv")
+
+colnames(bio_clim) <- c(
+  "grid_cell",                          # grid_cell (assuming it's the first column)
+  "Annual_Mean_Temperature",            # BIO1
+  "Mean_Diurnal_Range",                 # BIO2
+  "Isothermality",                      # BIO3
+  "Temperature_Seasonality",            # BIO4
+  "Max_Temperature_of_Warmest_Month",   # BIO5
+  "Min_Temperature_of_Coldest_Month",   # BIO6
+  "Temperature_Annual_Range",           # BIO7
+  "Mean_Temperature_of_Wettest_Quarter", # BIO8
+  "Mean_Temperature_of_Driest_Quarter", # BIO9
+  "Mean_Temperature_of_Warmest_Quarter",# BIO10
+  "Mean_Temperature_of_Coldest_Quarter",# BIO11
+  "Annual_Precipitation",               # BIO12
+  "Precipitation_of_Wettest_Month",     # BIO13
+  "Precipitation_of_Driest_Month",      # BIO14
+  "Precipitation_Seasonality",          # BIO15
+  "Precipitation_of_Wettest_Quarter",   # BIO16
+  "Precipitation_of_Driest_Quarter",    # BIO17
+  "Precipitation_of_Warmest_Quarter",   # BIO18
+  "Precipitation_of_Coldest_Quarter"    # BIO19
+)
+
+processed_diversity <- read.csv("~/Desktop/PINC_Climate_Change/Project 2/processed_diversity.csv")
+
+# merge the datasets
+DATA_1 <- merge(bio_clim, ncld_detailed_percentage, by = "grid_cell")
+
+DATA <- merge(DATA_1, processed_diversity, by = "grid_cell")
+
+#make graph
+mapview(DATA, xcol = "X_Axis_0_", ycol = "X_Axis_1_", crs = 3310, grid = TRUE)
+
+# Convert DATA to spatial (sf) object
+DATA_sf <- st_as_sf(DATA, coords = c("X_Axis_0_", "X_Axis_1_"), crs = 3310)
+mapview(DATA_sf, zcol = "Developed_High_Intensity")
+
+ggplot(DATA_sf) +
+  geom_sf(aes(color = Developed_Open_Space), size = 1) +
+  scale_color_viridis_c() +
+  theme_minimal() +
+  labs(title = "Developed Open Space in California")
+
+DATA_sf$Total_Developed <- DATA_sf$Developed_Open_Space +
+  DATA_sf$Developed_Low_Intensity +
+  DATA_sf$Developed_Medium_Intensity +
+  DATA_sf$Developed_High_Intensity
+
+ggplot(DATA_sf) +
+  geom_sf(aes(color = Total_Developed), size = 1) +
+  scale_color_viridis_c() +
+  theme_minimal() +
+  labs(title = "Total Developed Land in California")
+
+mapview(DATA_sf, zcol = "Developed_Low_Intensity")
+mapview(DATA_sf, zcol = "Developed_Medium_Intensity")
+mapview(DATA_sf, zcol = "Developed_High_Intensity")
+
+library(tidyr)
+library(RColorBrewer)
+
+# Pivot longer for faceted plotting
+DATA_long <- DATA_sf %>%
+  pivot_longer(cols = c(Developed_Low_Intensity,
+                        Developed_Medium_Intensity,
+                        Developed_High_Intensity),
+               names_to = "Development_Type",
+               values_to = "Percentage")
+
+ggplot(DATA_long) +
+  geom_sf(aes(color = Percentage), size = 0.8) +
+  scale_color_viridis_c(option = "C") +
+  facet_wrap(~ Development_Type) +
+  theme_minimal() +
+  labs(title = "Developed Land Intensity Types in California")
+
+plot(st_geometry(DATA_sf))  # Should look like California!
+
+```
+
+```{r}
+# Load libraries
+library(MASS)
+library(ggplot2)
+library(dplyr)
+library(sf)
+
+# ---------------------------------------------------
+# Step 1: Clean data
+# ---------------------------------------------------
+
+# Drop geometry if sf
+if ("sf" %in% class(DATA_sf)) {
+  data_clean <- st_drop_geometry(DATA_sf)
+} else {
+  data_clean <- DATA_sf
+}
+
+# Define the variables to keep
+landcover_vars <- c(
+  "Open_Water", "Developed_Open_Space", "Developed_Low_Intensity",
+  "Developed_Medium_Intensity", "Developed_High_Intensity",
+  "Barren_Land_Rock_Sand_Clay", "Deciduous_Forest", "Evergreen_Forest",
+  "Mixed_Forest", "Shrub_Scrub", "Grassland_Herbaceous", "Pasture_Hay",
+  "Cultivated_Crops", "Woody_Wetlands", "Emergent_Herbaceous_Wetlands"
+)
+
+model_vars <- c("X_ENDC_RICHNESS_", landcover_vars)
+
+# Keep only those columns that exist and are numeric
+model_vars <- model_vars[model_vars %in% names(data_clean)]
+data_clean <- data_clean[, model_vars]
+
+# Convert everything to numeric
+data_clean[] <- lapply(data_clean, function(x) as.numeric(as.character(x)))
+
+# Remove rows with any NAs
+data_clean <- na.omit(data_clean)
+
+# Remove constant predictors
+nonconstant <- sapply(data_clean, function(x) var(x) > 0)
+data_clean <- data_clean[, nonconstant]
+
+# ---------------------------------------------------
+# Step 2: Stepwise Regression
+# ---------------------------------------------------
+
+# Create formula
+predictors <- setdiff(names(data_clean), "X_ENDC_RICHNESS_")
+formula_full <- as.formula(paste("X_ENDC_RICHNESS_ ~", paste(predictors, collapse = " + ")))
+
+# Forward
+forward_CWE_model <- step(lm(X_ENDC_RICHNESS_ ~ 1, data = data_clean),
+                      scope = list(lower = ~1, upper = formula_full),
+                      direction = "forward")
+
+# Backward
+backward_model <- step(lm(formula_full, data = data_clean),
+                       direction = "backward")
+
+# ---------------------------------------------------
+# Step 3: Visualize
+# ---------------------------------------------------
+
+# Predictions
+data_clean$forward_CWE_pred <- predict(forward_CWE_model)
+data_clean$backward_pred <- predict(backward_model)
+
+# Prediction plot
+ggplot(data_clean, aes(x = X_ENDC_RICHNESS_)) +
+  geom_point(aes(y = forward_CWE_pred), color = "red", alpha = 0.5) +
+  geom_point(aes(y = backward_pred), color = "blue", alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Predicted vs Actual Bee Richness",
+    x = "Actual Species Richness",
+    y = "Predicted Richness"
+  ) +
+  theme_minimal()
+
+# Coefficient plots
+coef_forward_CWE <- as.data.frame(summary(forward_CWE_model)$coefficients)
+coef_forward_CWE$term <- rownames(coef_forward_CWE)
+coef_forward_CWE$model <- "Forward"
+
+coef_backward <- as.data.frame(summary(backward_model)$coefficients)
+coef_backward$term <- rownames(coef_backward)
+coef_backward$model <- "Backward"
+
+coef_combined <- rbind(coef_forward_CWE, coef_backward)
+coef_combined <- coef_combined[coef_combined$term != "(Intercept)", ]
+
+ggplot(coef_combined, aes(x = reorder(term, Estimate), y = Estimate, fill = model)) +
+  geom_col(position = position_dodge()) +
+  coord_flip() +
+  labs(
+    title = "Land Cover Effects on Bee Richness",
+    x = "Predictor",
+    y = "Coefficient Estimate"
+  ) +
+  theme_minimal()
+
+
+library(tidyr)
+library(ggplot2)
+
+pred_df <- data_clean %>%
+  dplyr::select(all_of(c("X_ENDC_RICHNESS_", "forward_CWE_pred", "backward_pred"))) %>%
+  pivot_longer(cols = c(forward_CWE_pred, backward_pred),
+               names_to = "Model",
+               values_to = "Predicted_Richness") %>%
+  mutate(Model = recode(Model,
+                        forward_CWE_pred = "Forward",
+                        backward_pred = "Backward"))
+
+
+# Plot with color legend
+ggplot(pred_df, aes(x = X_ENDC_RICHNESS_, y = Predicted_Richness, color = Model)) +
+  geom_point(alpha = 0.5, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  scale_color_manual(values = c("Forward" = "red", "Backward" = "blue")) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Predicted vs Actual Bee Richness",
+    x = "Actual Species Richness",
+    y = "Predicted Richness",
+    color = "Model"
+  )
+```
+
+```{r}
+# Load packages
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(car)
+library(tidyr)
+library(sf)
+
+# --------------------------------------------------
+# STEP 1: Clean data
+# --------------------------------------------------
+
+# Drop geometry if present
+if ("sf" %in% class(DATA_sf)) {
+  data_clean <- st_drop_geometry(DATA_sf)
+} else {
+  data_clean <- DATA_sf
+}
+
+# Define the target and predictors
+landcover_vars <- c(
+  "Open_Water", "Developed_Open_Space", "Developed_Low_Intensity",
+  "Developed_Medium_Intensity", "Developed_High_Intensity",
+  "Barren_Land_Rock_Sand_Clay", "Deciduous_Forest", "Evergreen_Forest",
+  "Mixed_Forest", "Shrub_Scrub", "Grassland_Herbaceous", "Pasture_Hay",
+  "Cultivated_Crops", "Woody_Wetlands", "Emergent_Herbaceous_Wetlands"
+)
+model_vars <- c("X_ENDC_RICHNESS_", landcover_vars)
+
+# Subset with base R, safely
+model_vars <- model_vars[model_vars %in% names(data_clean)]
+data_clean <- data_clean[, model_vars]
+
+# Convert to numeric safely
+for (col in names(data_clean)) {
+  data_clean[[col]] <- suppressWarnings(as.numeric(as.character(data_clean[[col]])))
+}
+
+# Remove rows with any missing values
+data_clean <- data_clean[complete.cases(data_clean), ]
+
+# Remove constant columns (zero variance)
+constant_cols <- sapply(data_clean, function(x) is.numeric(x) && var(x, na.rm = TRUE) > 0)
+data_clean <- data_clean[, constant_cols]
+
+# --------------------------------------------------
+# STEP 2: Stepwise Regression
+# --------------------------------------------------
+
+# Create formula
+predictors <- setdiff(names(data_clean), "X_ENDC_RICHNESS_")
+formula_full <- as.formula(paste("X_ENDC_RICHNESS_ ~", paste(predictors, collapse = " + ")))
+
+# Fit full model
+full_model <- lm(formula_full, data = data_clean)
+
+# Step 1: Set up the models
+null_model <- lm(X_ENDC_RICHNESS_ ~ 1, data = data_clean)           # Intercept-only model
+full_model <- lm(formula_full, data = data_clean)                   # All predictors
+
+# Step 2: Run forward stepwise regression
+forward_model <- step(null_model,
+                      scope = list(lower = null_model, upper = full_model),
+                      direction = "forward",
+                      trace = 0)
+
+# Let’s try this # Start with null model (intercept only)
+null_model <- lm(X_ENDC_RICHNESS_ ~ 1, data = data_clean)
+full_model  <- lm(formula_full, data = data_clean)
+
+options(na.action = "na.fail")  # Required by dredge()
+
+# Fit full model with all predictors
+full_model <- lm(formula_full, data = data_clean)
+
+model_set <- dredge(full_model, trace = FALSE)  # AIC by default
+top5 <- head(model_set, 5)  # Top 5 models by AIC
+print(top5)
+# --------------------------------------------------
+# STEP 3: Visualization
+# --------------------------------------------------
+
+# Add predictions
+data_clean$forward_pred <- predict(forward_model)
+data_clean$backward_pred <- predict(backward_model)
+
+# Predicted vs Actual
+ggplot(data_clean, aes(x = X_ENDC_RICHNESS_)) +
+  geom_point(aes(y = forward_pred, color = "Forward"), alpha = 0.5) +
+  geom_point(aes(y = backward_pred, color = "Backward"), alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray30") +
+  scale_color_manual(values = c("Forward" = "red", "Backward" = "blue")) +
+  labs(
+    title = "Stepwise Regression: Predicted vs Actual Bee Richness",
+    x = "Actual Richness",
+    y = "Predicted Richness",
+    color = "Model"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Coefficient plots
+coef_f <- as.data.frame(summary(forward_model)$coefficients)
+coef_b <- as.data.frame(summary(backward_model)$coefficients)
+coef_f$term <- rownames(coef_f)
+coef_b$term <- rownames(coef_b)
+coef_f$model <- "Forward"
+coef_b$model <- "Backward"
+
+coef_comb <- rbind(coef_f, coef_b)
+coef_comb <- coef_comb[coef_comb$term != "(Intercept)", ]
+
+ggplot(coef_comb, aes(x = reorder(term, Estimate), y = Estimate, fill = model)) +
+  geom_col(position = position_dodge()) +
+  coord_flip() +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Species Richness",
+    x = "Predictor Variable",
+    y = "Coefficient Estimate"
+  )
+
+# --------------------------------------------------
+# STEP 4: Residuals
+# --------------------------------------------------
+
+par(mfrow = c(1, 2))
+plot(resid(forward_model), main = "Forward Residuals", ylab = "Residuals")
+plot(resid(backward_model), main = "Backward Residuals", ylab = "Residuals")
+par(mfrow = c(1, 1))
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Prepare residuals in long format
+resid_df <- data.frame(
+  Index = 1:nrow(data_clean),
+  Forward = resid(forward_model),
+  Backward = resid(backward_model)
+)
+
+# Convert to long format for ggplot
+resid_long <- resid_df %>%
+  pivot_longer(cols = c("Forward", "Backward"), names_to = "Model", values_to = "Residual")
+
+# Plot residuals
+ggplot(resid_long, aes(x = Index, y = Residual, color = Model)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  scale_color_manual(values = c("Forward" = "red", "Backward" = "blue")) +
+  facet_wrap(~ Model, ncol = 2) +
+  labs(
+    title = "Stepwise Regression Residuals",
+    y = "Residuals",
+    x = "Observation Index",
+    color = "Model"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+# Add significance and error bars to the species richness coefficient plot
+library(broom)
+
+# Use broom::tidy to get std.error and p-values
+coef_f <- tidy(forward_model) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(model = "Forward")
+
+coef_b <- tidy(backward_model) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(model = "Backward")
+
+# Combine and annotate
+coef_comb <- bind_rows(coef_f, coef_b) %>%
+  mutate(sig = ifelse(p.value < 0.05, "*", ""))
+
+# Plot with error bars and significance stars
+ggplot(coef_comb, aes(x = reorder(term, estimate), y = estimate, fill = model)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  geom_errorbar(
+    aes(ymin = estimate - std.error, ymax = estimate + std.error),
+    width = 0.2,
+    position = position_dodge(width = 0.9)
+  ) +
+  geom_text(
+    aes(label = sig),
+    position = position_dodge(width = 0.9),
+    vjust = -0.5,
+    size = 5,
+    color = "black"
+  ) +
+  coord_flip() +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Species Richness",
+    x = "Predictor Variable",
+    y = "Coefficient Estimate"
+  )
+
+```
+
+```{r}
+# Load libraries
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(car)
+library(tidyr)
+library(sf)
+library(MuMIn)
+library(broom)
+
+# --------------------------
+# STEP 1: Clean the data
+# --------------------------
+# Drop geometry
+if ("sf" %in% class(DATA_sf)) {
+  DATA_clean <- st_drop_geometry(DATA_sf)
+} else {
+  DATA_clean <- DATA_sf
+}
+
+# Set response and predictor variables
+endemism_response <- "X_ENDC_CWE_"  # <-- your endemism column
+landcover_vars <- c(
+  "Open_Water", "Developed_Open_Space", "Developed_Low_Intensity",
+  "Developed_Medium_Intensity", "Developed_High_Intensity",
+  "Barren_Land_Rock_Sand_Clay", "Deciduous_Forest", "Evergreen_Forest",
+  "Mixed_Forest", "Shrub_Scrub", "Grassland_Herbaceous", "Pasture_Hay",
+  "Cultivated_Crops", "Woody_Wetlands", "Emergent_Herbaceous_Wetlands"
+)
+model_vars <- c(endemism_response, landcover_vars)
+model_vars <- model_vars[model_vars %in% names(DATA_clean)]
+DATA_clean <- DATA_clean[, model_vars]
+
+# Convert all to numeric safely
+for (col in names(DATA_clean)) {
+  DATA_clean[[col]] <- suppressWarnings(as.numeric(as.character(DATA_clean[[col]])))
+}
+
+# Remove missing data and constant columns
+DATA_clean <- DATA_clean[complete.cases(DATA_clean), ]
+constant_cols <- sapply(DATA_clean, function(x) is.numeric(x) && var(x, na.rm = TRUE) > 0)
+DATA_clean <- DATA_clean[, constant_cols]
+
+# --------------------------
+# STEP 2: Stepwise Regression
+# --------------------------
+predictors <- setdiff(names(DATA_clean), endemism_response)
+formula_full <- as.formula(paste(endemism_response, "~", paste(predictors, collapse = " + ")))
+
+null_model_CWE <- lm(as.formula(paste(endemism_response, "~ 1")), data = DATA_clean)
+full_model_CWE <- lm(formula_full, data = DATA_clean)
+
+# Forward and backward stepwise selection
+forward_CWE_model <- step(null_model_CWE, scope = list(lower = null_model_CWE, upper = full_model_CWE),
+                      direction = "forward", trace = 0)
+backward_CWE_model <- step(full_model_CWE, scope = list(lower = null_model_CWE, upper = full_model_CWE),
+                       direction = "backward", trace = 0)
+
+# Dredge top models (optional)
+options(na.action = "na.fail")
+model_set <- dredge(full_model_CWE, trace = FALSE)
+top5 <- head(model_set, 5)
+print(top5)
+
+# Add predictions to data
+DATA_clean$forward_CWE_pred <- predict(forward_CWE_model)
+DATA_clean$backward_CWE_pred <- predict(backward_CWE_model)
+
+# --------------------------
+# STEP 3: Predicted vs Actual Plot
+# --------------------------
+ggplot(DATA_clean, aes(x = DATA_clean[[endemism_response]])) +
+  geom_point(aes(y = forward_CWE_pred, color = "Forward"), alpha = 0.5) +
+  geom_point(aes(y = backward_CWE_pred, color = "Backward"), alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("Forward" = "red", "Backward" = "blue")) +
+  labs(
+    title = "Stepwise Regression: Predicted vs Actual Species Endemism",
+    x = "Actual Endemism",
+    y = "Predicted",
+    color = "Model"
+  ) +
+  theme_minimal(base_size = 14)
+
+# --------------------------
+# STEP 4: Coefficient Plot with Error Bars and Significance
+# --------------------------
+# Tidy model outputs
+coef_f <- tidy(forward_CWE_model) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(model = "Forward")
+
+coef_b <- tidy(backward_CWE_model) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(model = "Backward")
+
+# Combine and annotate
+coef_comb <- bind_rows(coef_f, coef_b) %>%
+  mutate(sig = ifelse(p.value < 0.05, "*", ""))
+
+# Plot
+ggplot(coef_comb, aes(x = reorder(term, estimate), y = estimate, fill = model)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error),
+                width = 0.2, position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sig), position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 5, color = "black") +
+  coord_flip() +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Correct Weighted Endemism",
+    x = "Predictor Variable",
+    y = "Coefficient Estimate"
+  )
+```
+
+

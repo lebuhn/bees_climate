@@ -1,0 +1,285 @@
+---
+title: "Bee Grid: Spatial Autocorrelation (EPSG:3310)"
+format: html
+execute:
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Overview
+
+This document runs spatial autocorrelation on a 15×15 km grid where each
+row is the **center** of a cell in **California Albers** (EPSG:3310). We
+approximate **queen contiguity** by linking cell centers within **\~22
+km** (edges ≈15 km, diagonals ≈21.21 km). We analyze two response
+variables per cell:
+
+-   `X_ENDC_CWE_` = corrected weighted endemism
+-   `X_ENDC_RICHNESS_` = species richness
+
+> **Assumptions**
+>
+> -   An object named **`data`** already exists in your session (from
+>     your earlier import chunk).
+> -   `data` contains columns `X_Axis_0_` (Northing, Y), `X_Axis_1_`
+>     (Easting, X), `X_ENDC_CWE_`, `X_ENDC_RICHNESS_`, and a `geometry`
+>     column (i.e., `data` is an `sf` object) in **EPSG:3310**. If CRS
+>     is missing, this script sets it to 3310.
+
+We proceed in small steps with clear annotations.
+
+------------------------------------------------------------------------
+
+### 1) Libraries
+
+```{r spatial-libs, echo=TRUE, message=FALSE, warning=FALSE}
+library(sf)         # Spatial vector data classes and projections.
+                    # Attach geometries to rows and work in meters (EPSG:3310).
+
+library(spdep)      # Spatial neighbors, weights, and Moran’s I tests.
+                    # Build neighbor lists/weights and run global/local autocorrelation.
+
+library(dplyr)      # Data manipulation helpers like mutate(), filter(), bind_cols().
+                    # Tidy inputs and join LISA results back to geometries.
+
+library(ggplot2)    # Plotting system for diagnostics and quick LISA maps.
+                    # Turn analysis output into interpretable figures.
+```
+
+------------------------------------------------------------------------
+
+### 2) Prepare points (already in EPSG:3310) and responses
+
+We verify required columns, keep complete rows, and confirm
+geometry/CRS.
+
+```{r spatial-prep, echo=TRUE}
+
+df <- data          # Work on a copy so the original 'data' remains unchanged.
+                    # Safer when re-running or modifying later chunks.
+
+stopifnot(          # Confirm coordinate and response columns exist before continuing.
+  all(c("X_Axis_0_", "X_Axis_1_", "X_ENDC_CWE_", "X_ENDC_RICHNESS_") %in% names(df))
+)                   # Early checks prevent confusing downstream failures.
+                    # Exact capitalization and trailing underscores matter.
+
+df_clean <- df %>%  # Keep only rows with complete coordinates and responses.
+  dplyr::filter(is.finite(X_Axis_0_), is.finite(X_Axis_1_),
+                is.finite(X_ENDC_CWE_), is.finite(X_ENDC_RICHNESS_))
+                    # Moran’s I uses neighbors and lags, so complete cases are required.
+
+# Ensure we have sf geometry in EPSG:3310.
+if (inherits(df_clean, "sf") && "geometry" %in% names(df_clean)) {
+  pts <- df_clean                                       # Use existing geometry.
+  if (is.na(sf::st_crs(pts))) sf::st_crs(pts) <- 3310   # Set CRS if missing.
+} else {
+  pts <- sf::st_as_sf(df_clean, coords = c("X_Axis_1_", "X_Axis_0_"), crs = 3310)
+}
+
+summary(sf::st_coordinates(pts))  # Quick look at easting/northing in meters (EPSG:3310).
+                                  # Values should resemble California Albers ranges.
+
+```
+
+------------------------------------------------------------------------
+
+### 3) Distance-band neighbors (≈22 km) and row-standardized weights
+
+We connect any two centers within **22 km** (queen-like). If any sites
+are isolated (e.g., extreme edges), we nudge the radius by **+2 km**.
+
+```{r spatial-neighbors, echo=TRUE, message=FALSE, warning=FALSE}
+
+
+neighbor_radius_km <- 22  # Threshold to capture edge (~15 km) and diagonal (~21.21 km) neighbors.
+                          # Approximates queen contiguity on a 15 km grid.
+
+coords_mat <-              # Extract numeric X/Y matrix (meters) for neighbor builders.
+  sf::st_coordinates(pts)  # spdep functions consume plain coordinate matrices.
+
+nb <- spdep::dnearneigh(   # Build distance-band neighbors from 0 to 22 km.
+  coords_mat, d1 = 0, d2 = neighbor_radius_km * 1000)
+                           # Any pair of sites within the band are neighbors (undirected).
+
+if (any(spdep::card(nb) == 0)) {  # If any cell has no neighbors (isolates), gently extend the band.
+  bump <- 2                       # Add a 2 km cushion to avoid isolates at boundaries.
+  nb <- spdep::dnearneigh(coords_mat, d1 = 0, d2 = (neighbor_radius_km + bump) * 1000)
+}                          # Keeps tests stable without over-connecting the graph.
+                           # Remove this if you prefer strict 22 km (with possible isolates).
+
+lw <- spdep::nb2listw(     # Convert neighbors to row-standardized weights (style = "W").
+  nb, style = "W", zero.policy = TRUE)
+                           # Each row sums to 1; zero.policy tolerates any remaining isolates.
+                           # These weights generate the spatial lag used in tests/plots.
+```
+
+------------------------------------------------------------------------
+
+### 4) Global Moran’s I for endemism and richness
+
+We compute both **analytical** Moran’s I and a **permutation** p-value
+(9999 sims). Interpretation: positive I + small p → clustering of
+similar values; near zero → weak/no autocorrelation.
+
+```{r spatial-global-moran, echo=TRUE}
+cwe  <- df_clean$X_ENDC_CWE_        # Corrected weighted endemism per grid cell.
+rich <- df_clean$X_ENDC_RICHNESS_   # Species richness per grid cell (note trailing underscore).
+
+moran_cwe     <- spdep::moran.test(cwe,  lw, zero.policy = TRUE)      # Analytical Moran’s I (CWE).
+moran_cwe_mc  <- spdep::moran.mc(  cwe,  lw, nsim = 9999, zero.policy = TRUE) # Permutation p (CWE).
+
+moran_rich    <- spdep::moran.test(rich, lw, zero.policy = TRUE)      # Analytical Moran’s I (Richness).
+moran_rich_mc <- spdep::moran.mc(  rich, lw, nsim = 9999, zero.policy = TRUE) # Permutation p (Richness).
+
+print(moran_cwe)        # Inspect I, expected I, variance, and analytical p-value (CWE).
+print(moran_cwe_mc)     # Inspect permutation distribution and p-value (CWE).
+print(moran_rich)       # Analytical Moran’s I for richness (compare with CWE).
+print(moran_rich_mc)    # Permutation p for richness.
+```
+
+------------------------------------------------------------------------
+
+## 🧭 What Moran’s I means
+
+-   **Moran’s I statistic (I)** measures spatial autocorrelation.
+
+    -   **I \> 0:** nearby cells are **more similar** than random
+        (positive spatial autocorrelation → clustering).
+
+    -   **I ≈ 0:** pattern is **random** (no spatial structure).
+
+    -   **I \< 0:** neighbors are **more dissimilar** than random
+        (negative spatial autocorrelation → checkerboard pattern).
+
+        The **Expectation** is what I would be under pure randomness.
+        The **Variance** and **standard deviate (Z-score)** show how far
+        your observed I is from that random expectation. The **p-value**
+        tells you whether the pattern is unlikely to arise by chance.
+
+------------------------------------------------------------------------
+
+## 🌿 Corrected Weighted Endemism (CWE)
+
+| Measure | Interpretation |
+|----|----|
+| Moran’s I = 0.079 | Weak positive autocorrelation — endemism is somewhat spatially clustered. |
+| Expected I ≈ 0 | Under randomization, we’d expect near zero, so this is above expectation. |
+| Z = 6.24 (p ≈ 2 × 10⁻¹⁰) | The observed clustering is **statistically significant**. |
+| Monte-Carlo p = 0.0006 | Confirms the analytical test — pattern is unlikely under randomness. |
+
+**Interpretation:**\
+
+Endemism values in nearby 15 × 15 km cells are **more similar than
+expected by chance**, but the autocorrelation strength is **modest** (I
+≈ 0.08).\
+
+→ Spatial clustering exists, but it’s not extreme — perhaps regional
+hotspots rather than broad gradients.
+
+------------------------------------------------------------------------
+
+## 🐝 Species Richness (RICH)
+
+| Measure | Interpretation |
+|----|----|
+| Moran’s I = 0.304 | Moderate-to-strong positive autocorrelation — richness is quite spatially clustered. |
+| Z = 22.7 (p \< 2 × 10⁻¹⁶) | Very strong, highly significant pattern. |
+| Monte-Carlo p = 0.0001 | Confirms significance. |
+
+**Interpretation:**\
+
+Species richness shows **substantial spatial structure**: neighboring
+cells tend to have very similar richness values, forming **large
+coherent clusters** of high-richness and low-richness areas.
+
+------------------------------------------------------------------------
+
+## 🧩 Comparing CWE and Richness
+
+-   **Both are clustered**, not random.
+
+-   **Richness** has about **4× stronger** spatial autocorrelation (I ≈
+    0.30 vs 0.08).
+
+-   This means richness is **more spatially smooth**, while endemism
+    varies more locally — consistent with ecological theory (endemics
+    concentrated in small pockets; richness follows broader
+    environmental gradients).
+
+**Summary:**\
+
+✅ Both endemism and richness are significantly spatially clustered.\
+
+📈 Richness shows **stronger and broader spatial autocorrelation**,
+while endemism clusters are **weaker and more localized**.
+
+### 5) Diagnostic Moran scatterplots
+
+These show values vs. **spatial lag** (neighbor-weighted mean). The
+slope is related to Moran’s I; plot quadrants hint at local
+cluster/outlier types.
+
+```{r spatial-moran-plots, echo=TRUE}
+spdep::moran.plot(cwe,  lw, zero.policy = TRUE,
+           main = "Moran Scatterplot: Endemism (CWE)")  # Slope ≈ I; quadrant pattern foreshadows LISA.
+
+spdep::moran.plot(rich, lw, zero.policy = TRUE,
+           main = "Moran Scatterplot: Richness")        # Same diagnostic for richness.
+```
+
+------------------------------------------------------------------------
+
+### 🌿 What this particular plot indicates- Richness
+
+-   The **dense cluster near the lower left corner** represents many
+    cells with **low richness** whose neighbors also have low richness —
+    a large *Low–Low* region.
+
+-   The **slope is clearly positive**, confirming the **positive Moran’s
+    I (≈ 0.30)** you saw in the test results — richness is spatially
+    clustered.
+
+-   A few points are labeled with ID numbers — those are **statistical
+    outliers** identified by the test as having unusually high or low
+    influence on Moran’s I.
+
+-   The small number of points in the **High–Low** and **Low–High**
+    quadrants show isolated exceptions to the general pattern of
+    clustering.
+
+### 🌿 What this particular plot indicates- CWE
+
+-   Most points cluster very tightly in the **lower-left quadrant**,
+    showing that many grid cells have **low CWE values surrounded by
+    other low values**.
+
+-   The **slope of the solid line** is slightly positive, confirming a
+    **weak but significant positive spatial autocorrelation** (as seen
+    in the numerical test, Moran’s I ≈ 0.08, p \< 0.001).
+
+-   Only a few labeled points (e.g., 713, 806, 829) lie far from the
+    main cloud — these are likely **outliers** or **isolated pockets of
+    endemism** that stand apart from their surroundings.
+
+### 🧩 Ecological meaning
+
+-   **Endemism** is spatially structured but not strongly so: a few
+    localized clusters exist, while most of the landscape has uniformly
+    low endemism.
+
+-   Compared to species richness, which showed a broad and strong
+    spatial pattern (I ≈ 0.30), CWE varies on a **finer spatial scale**,
+    forming **small, localized hotspots**.
+
+-   Sanity checks (optional)
+
+These quick checks help confirm variable names and CRS.
+
+```{r sanity, echo=TRUE}
+str(data[, c("X_ENDC_CWE_", "X_ENDC_RICHNESS_")])  # Confirm response columns exist and types.
+sf::st_crs(data)                                    # Confirm CRS is EPSG:3310 (or set earlier if missing).
+head(sf::st_coordinates(pts))                       # Confirm coordinates look like meters.
+```
