@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-This code chunk loads the library and reads the data sets.
+This code chunk loads the library and reads the data sets. Maps data on development
 
 ```{r}
 library("readr")
@@ -25,6 +25,7 @@ library("MuMIn")
 
 ncld_detailed_percentage <- read.csv("~/Desktop/PINC_Climate_Change/Project 2/nlcd_2001_detailed_percentages.csv")
 
+#converts number codes to names for variables
 colnames(ncld_detailed_percentage) <- c(
   "grid_cell",                         # grid_cell (assuming it's the first column)
   "Open_Water",                        # 11
