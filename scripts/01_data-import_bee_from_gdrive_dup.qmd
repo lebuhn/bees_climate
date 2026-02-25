@@ -4,7 +4,7 @@ format: html
 editor: visual
 ---
 
-## This is a file that imports data 
+## This is a file that imports data
 
 ```{r}
 # Quarto/R setup for private Google Drive access

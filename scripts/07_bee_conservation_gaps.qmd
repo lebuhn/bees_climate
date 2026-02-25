@@ -1,0 +1,761 @@
+---
+title: "California Bee Diversity & Conservation Gaps"
+author: "Gretchen LeBuhn"
+date: "`r Sys.Date()`"
+format:
+  html:
+    self-contained: true
+    toc: true
+    toc-depth: 4
+    theme: sandstone
+    code-fold: true
+    fig-width: 9
+    fig-height: 7
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+This document overlays California bee species richness and endemism (CWE) data with the CA Nature Terrestrial 30x30 Conserved Areas layer to identify **conservation gaps** — areas of high bee diversity or endemism that fall outside GAP 1 & 2 protected lands.
+
+Four maps are produced:
+
+1.  Bee richness overlaid on conserved lands
+2.  Bee endemism (CWE) overlaid on conserved lands
+3.  Conservation gaps — high richness, low protection
+4.  Conservation gaps — high endemism, low protection
+
+------------------------------------------------------------------------
+
+## Setup
+
+```{r setup}
+# Load googledrive to authenticate and access files stored on Google Drive
+# This package handles OAuth tokens and Drive API calls
+library(googledrive)
+
+# Load readr for fast, clean reading of CSV files into R
+# It handles column type guessing and encoding better than base read.csv()
+library(readr)
+
+# Load dplyr for data manipulation verbs like filter(), mutate(), and select()
+# It provides a consistent grammar for transforming data frames
+library(dplyr)
+
+# Load tidyverse as a meta-package covering ggplot2, tidyr, stringr, and more
+# Many of its member packages are used throughout this script
+library(tidyverse)
+
+# Load sf (simple features) for reading, transforming, and joining spatial data
+# It represents geographic features as standard R data frames with a geometry column
+library(sf)
+
+# Load ggplot2 for building publication-quality maps and figures layer by layer
+# It is already included in tidyverse but loaded explicitly for clarity
+library(ggplot2)
+
+# Load viridis for perceptually uniform, colorblind-friendly color palettes
+# These palettes work well for continuous variables like richness and CWE
+library(viridis)
+
+# Load patchwork to combine multiple ggplot objects into a single figure layout
+# Useful for side-by-side or stacked multi-panel map displays
+library(patchwork)
+
+# Load scales for formatting axis labels and legend text (e.g., commas, percentages)
+# Used here to format richness and CWE values on map legends
+library(scales)
+
+# Load glue
+library(glue)
+
+# Set gargle options to cache the OAuth token in a local .secrets folder
+# This means you only need to authenticate in the browser once per machine
+options(gargle_oauth_cache = ".secrets", gargle_oauth_email = NA_character_)
+
+# Authenticate with Google Drive using the cached token in .secrets
+# If no cached token exists, this will open a browser window for sign-in
+drive_auth(cache = ".secrets")
+```
+
+------------------------------------------------------------------------
+
+## Load Data
+
+### Bee diversity data (from Google Drive)
+
+This loads the processed bee data that already has ecoregion assignments and spatial coordinates in CA Albers (CRS 3310).
+
+```{r load-bee-data}
+
+
+# List files in the github_data/bees_climate_data/processed folder on Google Drive and filter to the GeoPackage
+# drive_ls() returns a tibble of file metadata; filter() finds the exact filename
+bee_items <- drive_ls(path = "github_data/bees_climate_data/processed") |>
+  filter(name == "eco.data.gpkg")
+
+# Check whether the GeoPackage was found (nrow == 1 means exactly one match)
+# If found, download it to a temporary file and read it as a spatial object
+if (nrow(bee_items) == 1) {
+
+  # Create a temporary file path with a .gpkg extension to store the download
+  # tempfile() generates a unique path in the system temp directory
+  gpkg_path <- tempfile(fileext = ".gpkg")
+
+  # Download the GeoPackage from Drive to the local temp path
+  # overwrite = TRUE replaces any existing file at that temp path
+  drive_download(bee_items, path = gpkg_path, overwrite = TRUE)
+
+  # Read the GeoPackage into R as an sf object preserving geometry and CRS
+  # quiet = TRUE suppresses the layer info message printed by st_read()
+  bee.data <- st_read(gpkg_path, quiet = TRUE)
+
+  # Print a confirmation message so you know which loading path was used
+  # This helps with debugging if results look unexpected
+  message("Loaded bee data from GeoPackage.")
+
+} else {
+
+  # If no GeoPackage was found, fall back to loading from the CSV file
+  # This branch re-applies the column renaming from the original processing script
+  message("GeoPackage not found — loading from CSV.")
+
+  # List files in github_data/bees_climate_data/processed and filter to the CSV filename
+  # Same pattern as above but targeting eco.data.csv instead
+  csv_items <- drive_ls(path = "github_data/bees_climate_data/processed") |>
+    filter(name == "eco.data.csv")
+
+  # Halt execution with an informative error if the CSV is also missing
+  # This prevents silent failures where bee.data would be undefined
+  stopifnot("eco.data.csv not found in github_data/bees_climate_data/processed" = nrow(csv_items) == 1)
+
+  # Create a temporary file path for the CSV download
+  # The .csv extension ensures readr treats it correctly
+  csv_path <- tempfile(fileext = ".csv")
+
+  # Download the CSV from Drive to the local temp path
+  # overwrite = TRUE ensures a fresh copy even if the file already exists
+  drive_download(csv_items, path = csv_path, overwrite = TRUE)
+
+  # Read the CSV and apply the full processing pipeline in one chained expression:
+  # rename() restores human-readable column names from the raw encoded field names,
+  # select() keeps only the columns needed for spatial analysis and modeling,
+  # drop_na() removes rows with missing coordinate values that cannot be mapped,
+  # and st_as_sf() converts the flat data frame into a spatial sf object using CRS 3310
+  bee.data <- read_csv(csv_path, show_col_types = FALSE) |>
+    rename(x.axis = X_Axis_0_, y.axis = X_Axis_1_,
+           cwe = X_ENDC_CWE_, richness = X_ENDC_RICHNESS_) |>
+    select(x.axis, y.axis, cwe, richness,
+           starts_with("bio"), starts_with("L")) |>
+    drop_na(x.axis, y.axis) |>
+    st_as_sf(coords = c("x.axis", "y.axis"), crs = 3310)
+}
+
+# Reproject bee.data to CA Albers (EPSG 3310) to match the conserved areas layer
+# st_transform() reprojects any sf object to the target CRS in meters
+bee.data <- st_transform(bee.data, crs = 3310)
+
+# Print a summary message showing grid cell count and the range of both response variables
+# glue::glue() lets us embed R expressions directly inside the string using {}
+message(glue::glue(
+  "Bee data: {nrow(bee.data)} grid cells | ",
+  "Richness range: {round(min(bee.data$richness, na.rm=TRUE), 1)} – ",
+  "{round(max(bee.data$richness, na.rm=TRUE), 1)} | ",
+  "CWE range: {round(min(bee.data$cwe, na.rm=TRUE), 3)} – ",
+  "{round(max(bee.data$cwe, na.rm=TRUE), 3)}"
+))
+```
+
+### 30x30 Conserved Areas shapefile (from Google Drive)
+
+The zip file is downloaded from Google Drive and unzipped automatically. Update `conserved_zip_name` and `conserved_drive_path` if your file or folder name differs.
+
+```{r load-conserved}
+
+
+# Set the Google Drive folder path where the conserved areas zip file is stored
+# This points to the github_data/bees_climate_data folder where the zip was uploaded
+conserved_drive_path <- "github_data/bees_climate_data"
+
+# Set the expected filename of the zip on Google Drive (URL-encoded with %2C for comma)
+# Update this if the file was saved with a different name on Drive
+conserved_zip_name   <- "30x30_Conserved_Areas%2C_Terrestrial_(2025).zip"
+
+# List files in the Drive folder and filter to the URL-encoded zip filename
+# drive_ls() returns all files in the folder; filter() isolates the target
+conserved_item <- drive_ls(path = conserved_drive_path) |>
+  filter(name == conserved_zip_name)
+
+# If the URL-encoded name returned no matches, try the literal comma version as a fallback
+# Some systems or upload tools store the filename with a literal comma instead of %2C
+if (nrow(conserved_item) == 0) {
+
+  # Repeat the Drive listing and filter for the comma version of the filename
+  # This handles both naming conventions without requiring manual intervention
+  conserved_item <- drive_ls(path = conserved_drive_path) |>
+    filter(name == "30x30_Conserved_Areas, Terrestrial_(2025).zip")
+}
+
+# Stop execution with a descriptive error message if neither filename was found
+# This prevents the script from proceeding without the required spatial data
+stopifnot(
+  "Conserved areas zip not found on Google Drive — check conserved_drive_path and conserved_zip_name" =
+    nrow(conserved_item) == 1
+)
+
+# Create a temporary file path with a .zip extension to receive the download
+# tempfile() guarantees a unique path that won't conflict with other files
+zip_path <- tempfile(fileext = ".zip")
+
+# Download the zip file from Drive to the local temporary path
+# overwrite = TRUE ensures any previous temp file at that path is replaced
+drive_download(conserved_item, path = zip_path, overwrite = TRUE)
+
+# Print a confirmation that the download completed successfully
+# This helps track progress since the conserved areas file can be large
+message("Downloaded conserved areas zip.")
+
+# Create a temporary directory to extract the zip contents into
+# tempfile() here generates a unique folder name prefixed with "conserved_"
+conserved_dir <- tempfile("conserved_")
+
+# Create the directory on disk so unzip() has somewhere to write files
+# dir.create() will error if the path already exists, but tempfile() ensures uniqueness
+dir.create(conserved_dir)
+
+# Extract all files from the zip archive into the temporary directory
+# exdir sets the destination; unzip() preserves any subfolder structure inside the zip
+unzip(zip_path, exdir = conserved_dir)
+
+# Search recursively through the extracted directory for any file ending in .shp
+# recursive = TRUE handles cases where the shapefile is inside a nested subfolder
+conserved_path <- list.files(
+  conserved_dir,
+  pattern     = "\\.shp$",
+  full.names  = TRUE,
+  recursive   = TRUE,
+  ignore.case = TRUE
+)
+
+# Stop execution if no .shp file was found after unzipping
+# This catches corrupt zips or zips that contain only non-shapefile formats
+stopifnot(
+  "No .shp file found after unzipping — check the zip contents" =
+    length(conserved_path) >= 1
+)
+
+# Take only the first .shp path in case multiple shapefiles exist in the zip
+# In practice the 30x30 zip contains one shapefile, but this makes the code robust
+conserved_path <- conserved_path[1]
+
+# Print the path of the shapefile being read so you can verify it is correct
+# This is especially helpful if the zip contains a nested folder structure
+message("Reading shapefile from: ", conserved_path)
+
+# Read the shapefile into R as an sf object and immediately reproject to CA Albers
+# quiet = TRUE suppresses the default layer info message from st_read()
+conserved <- st_read(conserved_path, quiet = TRUE) |>
+  st_transform(crs = 3310)
+
+# Print the number of polygons loaded as a basic sanity check
+# The 30x30 layer contains tens of thousands of polygons statewide
+message(glue::glue("Conserved areas: {nrow(conserved)} polygons loaded."))
+```
+
+------------------------------------------------------------------------
+
+## Prepare Conserved Areas
+
+GAP 1 = permanently protected, biodiversity focus\
+GAP 2 = managed mostly for biodiversity but may allow some extractive use\
+GAP 3 = multiple use, biodiversity not primary focus\
+GAP 4 = no known biodiversity focus (e.g. working lands)
+
+We define **"well conserved"** as GAP 1 or GAP 2.
+
+```{r prep-conserved}
+# Filter polygons that contain any GAP 1 or GAP 2 acreage
+conserved_gap12 <- conserved |>
+  filter(Gap1_acres > 0 | Gap2_acres > 0)
+
+message(glue("Invalid geometries before repair: {sum(!st_is_valid(conserved_gap12))}"))
+
+# Repair geometries (drop Z first can help; safe to do either way)
+conserved_gap12 <- conserved_gap12 |>
+  mutate(geometry = st_zm(geometry, drop = TRUE, what = "ZM")) |>
+  mutate(geometry = st_make_valid(geometry))
+
+message(glue("Invalid geometries after repair:  {sum(!st_is_valid(conserved_gap12))}"))
+
+message("Dissolving GAP 1 & 2 areas... (may take a moment)")
+
+# Dissolve into one geometry
+conserved_union <- conserved_gap12 |>
+  summarise(geometry = st_union(geometry)) |>
+  mutate(protected = "GAP 1 & 2")
+
+# Report total GAP 1 + 2 acres
+gap12_acres <- sum(conserved_gap12$Gap1_acres + conserved_gap12$Gap2_acres, na.rm = TRUE)
+
+message(glue(
+  "GAP 1 & 2 coverage: {round(gap12_acres / 1e6, 2)} million acres"
+))
+```
+
+------------------------------------------------------------------------
+
+## Classify Bee Grid Cells by Protection Status
+
+Each bee grid cell is classified as **protected** (intersects GAP 1 or 2) or **unprotected**.
+
+```{r classify-protection}
+# Perform a spatial join to identify which bee grid cells overlap GAP 1 & 2 areas
+# st_intersects returns a match wherever a bee cell touches the conserved union polygon;
+# cells that don't overlap receive NA in the "protected" column
+bee_prot <- st_join(
+  bee.data,
+  conserved_union |> select(protected),
+  join = st_intersects
+) |>
+  # Create a logical TRUE/FALSE column: TRUE if the cell fell inside a protected area
+  # !is.na(protected) is TRUE for cells that matched and FALSE for those that did not
+  mutate(is_protected = !is.na(protected))
+
+# Build a summary table counting protected vs unprotected cells
+# st_drop_geometry() removes the spatial column so count() works on a plain data frame
+prot_summary <- bee_prot |>
+  st_drop_geometry() |>
+  # Count how many cells fall into each category (TRUE = protected, FALSE = unprotected)
+  # mutate() then adds a percentage column rounded to one decimal place
+  count(is_protected) |>
+  mutate(pct = round(100 * n / sum(n), 1))
+
+# Print the protection summary table to the console for a quick sanity check
+# This shows how many grid cells are inside vs outside conserved lands
+print(prot_summary)
+```
+
+------------------------------------------------------------------------
+
+## Define Conservation Gap Thresholds
+
+"High" richness and endemism are defined as cells in the **top 25th percentile** (i.e., ≥ 75th percentile). Adjust `gap_quantile` below to change this threshold.
+
+```{r gap-thresholds}
+# Set the quantile threshold that defines "high" biodiversity (0.75 = top 25%)
+# Increase this value (e.g., 0.90) to identify only the very highest-priority cells
+gap_quantile <- 0.75
+
+# Calculate the richness value at the chosen quantile across all bee grid cells
+# na.rm = TRUE ensures missing values don't cause quantile() to return NA
+rich_thresh <- quantile(bee.data$richness, gap_quantile, na.rm = TRUE)
+
+# Calculate the CWE value at the chosen quantile across all bee grid cells
+# This threshold is applied symmetrically with rich_thresh to define "high endemism"
+cwe_thresh  <- quantile(bee.data$cwe, gap_quantile, na.rm = TRUE)
+
+# Print both thresholds so the exact cutoff values are visible in the output
+# This makes the gap definition transparent and reproducible in any write-up
+message(glue::glue(
+  "Richness threshold (≥{gap_quantile*100}th pctile): {round(rich_thresh, 1)} species\n",
+  "CWE threshold     (≥{gap_quantile*100}th pctile): {round(cwe_thresh, 4)}"
+))
+
+# Add four new columns to bee_prot classifying each cell's gap and priority status:
+# rich_gap and cwe_gap are TRUE/FALSE flags for cells that are both high-diversity
+# AND unprotected — these are the conservation gaps we want to map
+bee_gaps <- bee_prot |>
+  mutate(
+    # TRUE if the cell has high richness AND falls outside GAP 1 & 2 protection
+    # Both conditions must be met simultaneously: above threshold AND not protected
+    rich_gap = richness >= rich_thresh & !is_protected,
+
+    # TRUE if the cell has high CWE AND falls outside GAP 1 & 2 protection
+    # Same logic as rich_gap but applied to the endemism variable
+    cwe_gap  = cwe >= cwe_thresh & !is_protected,
+
+    # Assign each cell to one of four richness-by-protection categories for map coloring
+    # case_when() evaluates conditions top-to-bottom and assigns the first match
+    rich_priority = case_when(
+      richness >= rich_thresh & !is_protected ~ "High richness, unprotected",
+      richness >= rich_thresh &  is_protected ~ "High richness, protected",
+      richness <  rich_thresh & !is_protected ~ "Lower richness, unprotected",
+      # TRUE acts as the else clause and catches all remaining cells
+      TRUE                                    ~ "Lower richness, protected"
+    ),
+
+    # Assign each cell to one of four endemism-by-protection categories for map coloring
+    # Mirrors the rich_priority logic but uses cwe and cwe_thresh instead
+    cwe_priority = case_when(
+      cwe >= cwe_thresh & !is_protected ~ "High endemism, unprotected",
+      cwe >= cwe_thresh &  is_protected ~ "High endemism, protected",
+      cwe <  cwe_thresh & !is_protected ~ "Lower endemism, unprotected",
+      # The TRUE fallback captures low-endemism, protected cells
+      TRUE                              ~ "Lower endemism, protected"
+    )
+  )
+```
+
+------------------------------------------------------------------------
+
+## Maps
+
+### Shared map elements
+
+```{r map-theme}
+# Create a rough CA state outline by unioning all conserved area polygons and taking the convex hull
+# st_make_valid() fixes any geometry errors before the union to prevent topology failures
+ca_outline <- st_union(conserved |> st_make_valid()) |>
+  # st_convex_hull() returns the smallest convex polygon enclosing all features
+  # This is a rough CA boundary; replace with a proper state boundary shapefile for cleaner maps
+  st_convex_hull()
+
+# Alternatively, load a proper CA state boundary:
+# library(tigris)
+# ca_state <- states(cb = TRUE) |> filter(STUSPS == "CA") |> st_transform(3310)
+
+# Define a shared ggplot theme applied to all four maps for visual consistency
+# theme_minimal() starts with a clean slate; base_size = 11 sets the default font size
+map_theme <- theme_minimal(base_size = 11) +
+  theme(
+    # Remove background grid lines — they distract from geographic features on maps
+    panel.grid       = element_blank(),
+    # Hide axis tick labels since coordinate values aren't meaningful to most map readers
+    axis.text        = element_blank(),
+    # Remove axis ticks to keep the map frame visually clean
+    axis.ticks       = element_blank(),
+    # Remove axis titles so "longitude" / "latitude" labels don't appear
+    axis.title       = element_blank(),
+    # Place the legend to the right of the map panel
+    legend.position  = "right",
+    # Set a narrow legend key width so color bars don't dominate the figure
+    legend.key.width = unit(0.4, "cm"),
+    # Make the plot title bold and slightly larger than the base font size
+    plot.title       = element_text(face = "bold", size = 13),
+    # Style the subtitle in smaller, muted gray to visually distinguish it from the title
+    plot.subtitle    = element_text(size = 10, color = "gray40")
+  )
+
+# Define a reusable ggplot layer that draws GAP 1 & 2 polygons as a gray background
+# Storing this as an object avoids repeating the same geom_sf() call in every map
+conserved_base <- geom_sf(
+  # Use the full GAP 1 & 2 layer (not the dissolved union) so internal boundaries are visible
+  data  = conserved_gap12,
+  # Fill all conserved polygons with medium gray to indicate protected status
+  fill  = "gray75",
+  # Set color = NA to suppress polygon border lines, which would clutter the background
+  color = NA,
+  # Partial transparency lets bee data points show through overlapping conserved areas
+  alpha = 0.6
+)
+```
+
+------------------------------------------------------------------------
+
+### Map 1 — Bee Richness Overlaid on Conserved Lands
+
+```{r map-richness-overlay, fig.alt="Bee richness across California with GAP 1 & 2 conserved areas shown in gray"}
+# Initialize a ggplot with no default data; all layers supply their own data argument
+# This is standard practice when combining multiple sf layers with different geometries
+map1 <- ggplot() +
+  # Add the gray GAP 1 & 2 conserved areas as the bottom layer
+  # This layer was defined in the map-theme chunk as a reusable geom object
+  conserved_base +
+  # Plot each bee grid cell as a point colored by its species richness value
+  # aes(color = richness) maps the richness column to the point color aesthetic
+  geom_sf(
+    data  = bee.data,
+    aes(color = richness),
+    # Small point size prevents cells from overlapping at the statewide scale
+    size  = 0.8,
+    # Slight transparency helps reveal density patterns where cells overlap
+    alpha = 0.85
+  ) +
+  # Apply the plasma viridis palette, grading from dark purple (low) to yellow (high)
+  # label_number(accuracy = 1) formats legend labels as whole numbers
+  scale_color_viridis_c(
+    option = "plasma",
+    name   = "Species\nrichness",
+    labels = label_number(accuracy = 1)
+  ) +
+  # Add a descriptive title and subtitle explaining what each layer represents
+  # glue::glue() lets us embed dynamic values or line breaks cleanly in strings
+  labs(
+    title    = "Bee Species Richness & Conserved Lands",
+    subtitle = glue::glue(
+      "Gray = GAP 1 & 2 conserved areas  |  ",
+      "Points = bee grid cells (CA Albers)"
+    )
+  ) +
+  # Apply the shared map theme for consistent styling across all four maps
+  map_theme
+
+# Render map1 to the output document
+map1
+```
+
+------------------------------------------------------------------------
+
+### Map 2 — Bee Endemism (CWE) Overlaid on Conserved Lands
+
+```{r map-cwe-overlay, fig.alt="Bee endemism (CWE) across California with GAP 1 & 2 conserved areas shown in gray"}
+# Initialize a new ggplot for the CWE map using the same layered structure as map1
+# A fresh ggplot() call is required because CWE uses a different color scale than richness
+map2 <- ggplot() +
+  # Add the gray GAP 1 & 2 conserved areas as the base layer, identical to map1
+  conserved_base +
+  # Plot bee grid cells colored by CWE (community-weighted endemism) value
+  # aes(color = cwe) maps the cwe column to the point color aesthetic
+  geom_sf(
+    data  = bee.data,
+    aes(color = cwe),
+    # Same size and alpha as map1 for visual consistency across all maps
+    size  = 0.8,
+    alpha = 0.85
+  ) +
+  # Apply the mako viridis palette, grading from near-black (low) to pale mint (high)
+  # accuracy = 0.001 shows three decimal places, appropriate for CWE's small value range
+  scale_color_viridis_c(
+    option = "mako",
+    name   = "Endemism\n(CWE)",
+    labels = label_number(accuracy = 0.001)
+  ) +
+  # Add title and subtitle; the subtitle spells out the CWE abbreviation for readers
+  labs(
+    title    = "Bee Endemism (CWE) & Conserved Lands",
+    subtitle = "Gray = GAP 1 & 2 conserved areas  |  CWE = community-weighted endemism"
+  ) +
+  # Apply the shared map theme to match the styling of all other maps
+  map_theme
+
+# Render map2 to the output document
+map2
+```
+
+------------------------------------------------------------------------
+
+### Map 3 — Conservation Gap: High Richness, Unprotected
+
+```{r map-richness-gap, fig.alt="Conservation gap map showing high bee richness areas outside GAP 1 & 2 lands"}
+# Define a named color vector for the four richness-by-protection categories
+# Red signals the conservation gap (high diversity, no protection); green = already protected
+gap_colors_rich <- c(
+  "High richness, unprotected"   = "darkorange1",   # red    — priority gap
+  "High richness, protected"     = "palegreen4",   # green  — already protected
+  "Lower richness, unprotected"  = "#c7c7c7",   # pale blue — lower priority
+  "Lower richness, protected"    = "#aec7e8"    # gray   — lower priority, protected
+)
+
+# Initialize the gap map; bee_gaps contains the four-category rich_priority column
+map3 <- ggplot() +
+  # Add the conserved areas base layer so protected land context is always visible
+  conserved_base +
+  # Plot bee cells colored by their four-category richness-protection status
+  # aes(color = rich_priority) maps the categorical column to point color
+  geom_sf(
+    data  = bee_gaps,
+    aes(color = rich_priority),
+    # Slightly larger points than the overlay maps so four categories are easier to read
+    size  = 0.9,
+    alpha = 0.9
+  ) +
+  # Apply the manually defined color palette; name = NULL removes the legend title
+  # override.aes enlarges the legend key points so small colors are legible
+  scale_color_manual(
+    values = gap_colors_rich,
+    name   = NULL,
+    guide  = guide_legend(override.aes = list(size = 3))
+  ) +
+  # Embed the computed richness threshold in the subtitle so the map is self-documenting
+  # round(rich_thresh, 1) formats the threshold value to one decimal place
+  labs(
+    title    = "Conservation Gap: Bee Species Richness",
+    subtitle = glue::glue(
+      "Orange = high richness (≥ {round(rich_thresh,1)} spp) AND unprotected  |  ",
+      "Threshold = {gap_quantile*100}th percentile"
+    )
+  ) +
+  # Apply the shared map theme for consistent styling
+  map_theme
+
+# Render map3 to the output document
+map3
+```
+
+------------------------------------------------------------------------
+
+### Map 4 — Conservation Gap: High Endemism, Unprotected
+
+```{r map-cwe-gap, fig.alt="Conservation gap map showing high bee endemism areas outside GAP 1 & 2 lands"}
+# Define a named color vector for the four endemism-by-protection categories
+# Color logic mirrors gap_colors_rich: orange = gap, green = protected, blues/grays = lower priority
+gap_colors_cwe <- c(
+  "High endemism, unprotected"   = "darkorange1",   # red    — priority gap
+  "High endemism, protected"     = "palegreen4",   # green  — already protected
+  "Lower endemism, unprotected"  = "#c7c7c7",   # gray — lower priority
+  "Lower endemism, protected"    = "#aec7e8"    # pale blue   — lower priority, protected
+)
+
+# Initialize the CWE gap map; structure mirrors map3 with cwe_priority replacing rich_priority
+map4 <- ggplot() +
+  # Add the conserved areas base layer for geographic and conservation context
+  conserved_base +
+  # Plot bee cells colored by their four-category endemism-protection status
+  # aes(color = cwe_priority) maps the categorical endemism column to point color
+  geom_sf(
+    data  = bee_gaps,
+    aes(color = cwe_priority),
+    # Same size and alpha as map3 for visual consistency
+    size  = 0.9,
+    alpha = 0.9
+  ) +
+  # Apply the CWE color palette; legend key size is overridden to improve legibility
+  scale_color_manual(
+    values = gap_colors_cwe,
+    name   = NULL,
+    guide  = guide_legend(override.aes = list(size = 3))
+  ) +
+  # Embed the computed CWE threshold in the subtitle using glue
+  # round(cwe_thresh, 4) shows four decimal places to reflect CWE's precision
+  labs(
+    title    = "Conservation Gap: Bee Rarity (CWE)",
+    subtitle = glue::glue(
+      "Orange = high rarity (≥ {round(cwe_thresh,4)} CWE) AND unprotected  |  ",
+      "Threshold = {gap_quantile*100}th percentile"
+    )
+  ) +
+  # Apply the shared map theme to match all other maps
+  map_theme
+
+# Render map4 to the output document
+map4
+```
+
+------------------------------------------------------------------------
+
+## Summary Statistics
+
+### Richness gap
+
+```{r summary-richness}
+# Start from the gap-classified data and remove the geometry column before summarising
+# st_drop_geometry() is needed because group_by() and summarise() work on plain data frames
+bee_gaps |>
+  st_drop_geometry() |>
+  # Group rows by their four-category richness-protection label
+  # This produces one summary row per category in the output table
+  group_by(rich_priority) |>
+  # Calculate the count, mean richness, and median richness for each category
+  # na.rm = TRUE ensures missing richness values don't propagate into statistics
+  summarise(
+    n_cells         = n(),
+    mean_richness   = round(mean(richness, na.rm = TRUE), 1),
+    median_richness = round(median(richness, na.rm = TRUE), 1)
+  ) |>
+  # Sort rows so the highest-richness categories appear at the top of the table
+  # desc() reverses the default ascending sort order
+  arrange(desc(mean_richness)) |>
+  # Render the result as a formatted HTML table with a descriptive caption
+  # knitr::kable() is the standard table renderer for Quarto HTML output
+  knitr::kable(caption = "Bee richness by conservation status")
+```
+
+### Endemism gap
+
+```{r summary-cwe}
+# Mirror the richness summary structure but grouped and summarised on endemism
+# st_drop_geometry() again drops the spatial column before aggregation
+bee_gaps |>
+  st_drop_geometry() |>
+  # Group by the four-category endemism-protection label
+  group_by(cwe_priority) |>
+  # Calculate count, mean CWE, and median CWE rounded to four decimal places
+  # Four decimals are appropriate because CWE values are typically small fractions
+  summarise(
+    n_cells    = n(),
+    mean_cwe   = round(mean(cwe, na.rm = TRUE), 4),
+    median_cwe = round(median(cwe, na.rm = TRUE), 4)
+  ) |>
+  # Sort so the highest-endemism category appears first in the table
+  arrange(desc(mean_cwe)) |>
+  # Render as a formatted table with a caption identifying the variable
+  knitr::kable(caption = "Bee endemism (CWE) by conservation status")
+```
+
+### Overlap: cells that are gaps for BOTH richness and endemism
+
+```{r summary-overlap}
+# Filter to cells where both rich_gap and cwe_gap are TRUE simultaneously
+# The & operator requires both conditions to be met; these dual-gap cells are the
+# highest conservation priorities — high richness AND high endemism AND unprotected
+dual_gap <- bee_gaps |>
+  st_drop_geometry() |>
+  filter(rich_gap & cwe_gap)
+
+# Report the count of dual-gap cells with an explanatory message
+# nrow(dual_gap) dynamically inserts the count into the glue string
+message(glue::glue(
+  "{nrow(dual_gap)} grid cells are high in BOTH richness AND endemism ",
+  "and fall outside GAP 1 & 2 protected areas — these are the highest-priority gaps."
+))
+```
+
+------------------------------------------------------------------------
+
+## Export Gap Layers
+
+Save the classified grid as a GeoPackage for use in QGIS or ArcGIS.
+
+```{r export}
+# Define the output directory name where exported GeoPackages will be saved
+# A dedicated outputs/ folder keeps exported files separate from raw data
+out_dir <- "outputs"
+
+# Create the outputs directory if it doesn't already exist
+# showWarnings = FALSE suppresses the warning that fires if the folder is already present
+dir.create(out_dir, showWarnings = FALSE)
+
+# Write the full classified bee grid (all cells with gap status columns) to a GeoPackage
+# append = FALSE overwrites any existing file at this path rather than adding a new layer
+st_write(
+  bee_gaps,
+  file.path(out_dir, "bee_conservation_gaps.gpkg"),
+  append = FALSE
+)
+
+# Subset to only the highest-priority cells: those flagged as a gap for richness OR endemism
+# The | (OR) operator keeps a cell if it is a gap on either variable, not necessarily both
+priority_gaps <- bee_gaps |>
+  filter(rich_gap | cwe_gap)
+
+# Write the priority-only subset to a separate GeoPackage for easy use in GIS software
+# This smaller file loads and renders faster than the full classified grid
+st_write(
+  priority_gaps,
+  file.path(out_dir, "bee_priority_gaps.gpkg"),
+  append = FALSE
+)
+
+# Print a final confirmation message with cell counts for both exported files
+# This confirms the export completed and gives a quick summary of what was saved
+message(glue::glue(
+  "Exported {nrow(bee_gaps)} classified cells and ",
+  "{nrow(priority_gaps)} priority gap cells to {out_dir}/"
+))
+```
+
+------------------------------------------------------------------------
+
+## Notes on the 30x30 Conserved Areas Data
+
+The Terrestrial 30x30 Conserved Areas layer (CA Nature, 2024b) integrates:
+
+-   **CPAD** (California Protected Areas Database, GreenInfo Network)
+-   **CCED** (California Conservation Easement Database, GreenInfo Network)
+-   **PAD-US** (USGS, Gap Analysis Project) for GAP status coding
+
+GAP status was assigned using an 80% areal overlap rule at the Superunit level. Areas with less than 80% overlap with any single GAP code were resolved at the Holdings level. Remaining uncoded areas were assigned GAP 4.
+
+Layer citation: *California Protected Areas Database (CPAD). December 2024. GreenInfo Network. www.calands.org*

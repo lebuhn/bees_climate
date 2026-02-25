@@ -196,7 +196,7 @@ I think this is fine for now.
 
 ```{r}
 # this is a plain csv
-write_csv(regional.data, '../data/working/eco.data.csv')
+write_csv(regional.data, '../data/processed/eco.data.csv')
 # this preserves the spatial data for mapping
-st_write(regional.data, "../data/working/eco.data.gpkg", append = FALSE) # false overwrites instead of appends
+st_write(regional.data, "../data/processed/eco.data.gpkg", append = FALSE) # false overwrites instead of appends
 ```

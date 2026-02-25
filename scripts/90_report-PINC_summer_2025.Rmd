@@ -21,7 +21,9 @@ library("viridisLite")
 library("vegan")
 library("MuMIn")
 
-ncld_detailed_percentage <- read.csv("~/Desktop/PINC_Climate_Change/Project 2/nlcd_2001_detailed_percentages.csv")
+ncld_detailed_percentage <- read_csv("../data/processed/nlcd_2001_detailed_percentages.csv")
+nlcd_detailed_percentage <- read_csv("./data/processed/nlcd_2001_detailed_percentages.csv")
+
 
 colnames(ncld_detailed_percentage) <- c(
   "grid_cell",                         # grid_cell (assuming it's the first column)
