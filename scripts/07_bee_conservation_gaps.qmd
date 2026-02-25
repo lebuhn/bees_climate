@@ -444,7 +444,7 @@ conserved_base <- geom_sf(
   # Use the full GAP 1 & 2 layer (not the dissolved union) so internal boundaries are visible
   data  = conserved_gap12,
   # Fill all conserved polygons with medium gray to indicate protected status
-  fill  = "gray75",
+  fill  = "gray30",
   # Set color = NA to suppress polygon border lines, which would clutter the background
   color = NA,
   # Partial transparency lets bee data points show through overlapping conserved areas
@@ -453,6 +453,24 @@ conserved_base <- geom_sf(
 ```
 
 ------------------------------------------------------------------------
+
+Conserved lands only
+
+```{r map-conserved-only, fig.alt="California with GAP 1 & 2 conserved areas shown in gray"}
+# Conserved lands only (GAP 1 & 2)
+map1 <- ggplot() +
+  # Gray GAP 1 & 2 conserved areas (from your reusable object)
+  conserved_base +
+  # Title/subtitle now describe only what’s shown
+  labs(
+    title    = "Conserved Lands (GAP 1 & 2)",
+    subtitle = "Gray = GAP 1 & 2 conserved areas"
+  ) +
+  # Keep your shared map theme
+  map_theme
+
+map1
+```
 
 ### Map 1 — Bee Richness Overlaid on Conserved Lands
 
