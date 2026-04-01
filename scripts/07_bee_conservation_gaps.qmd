@@ -52,10 +52,6 @@ library(tidyverse)
 # It represents geographic features as standard R data frames with a geometry column
 library(sf)
 
-# Load ggplot2 for building publication-quality maps and figures layer by layer
-# It is already included in tidyverse but loaded explicitly for clarity
-library(ggplot2)
-
 # Load viridis for perceptually uniform, colorblind-friendly color palettes
 # These palettes work well for continuous variables like richness and CWE
 library(viridis)
@@ -335,6 +331,9 @@ prot_summary <- bee_prot |>
 # Print the protection summary table to the console for a quick sanity check
 # This shows how many grid cells are inside vs outside conserved lands
 print(prot_summary)
+
+## Save the protected data
+write_csv(bee_prot, data/processed/bee_quadrat_protected.csv)
 ```
 
 ------------------------------------------------------------------------
