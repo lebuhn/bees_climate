@@ -333,7 +333,11 @@ prot_summary <- bee_prot |>
 print(prot_summary)
 
 ## Save the protected data
-write_csv(bee_prot, data/processed/bee_quadrat_protected.csv)
+
+# quad_prot <- bee_prot %>%
+#   select(geom, is_protected, L1.name, L2.name, L3.name)
+# 
+# write_csv(quad_prot, "data/processed/bee_quadrat_protected.csv")
 ```
 
 ------------------------------------------------------------------------
