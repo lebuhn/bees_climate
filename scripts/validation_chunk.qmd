@@ -1,0 +1,510 @@
+------------------------------------------------------------------------
+
+## Data Integrity Validation
+
+This section runs after all analysis chunks have executed. It checks each
+of the thirteen issues identified in the crosscheck review: silent data
+loss, NA propagation, row-count changes across joins, type mismatches,
+geometry validity, CRS consistency, and output visibility. Results are
+collected into a single table so that all issues are visible at once
+rather than stopping on the first failure.
+
+Each check is assigned one of three statuses:
+
+- **FAIL** — a problem that will produce incorrect results and must be
+  resolved before any findings are reported.
+- **WARN** — a condition that may be acceptable but requires a conscious
+  decision; document your reasoning if you proceed.
+- **PASS** — the check found no problem.
+
+The table is rendered twice: as plain text to the console (visible when
+running interactively) and as a formatted HTML table in the rendered
+document. Note that because `execute: message: false` is set in the YAML
+header, `message()` calls elsewhere in the script are suppressed in the
+HTML output; this chunk uses `cat()` for the console summary so it is
+always visible regardless of that setting.
+
+```{r validation, message=TRUE}
+# ==============================================================================
+# DATA INTEGRITY VALIDATION
+# Run this chunk after all preceding chunks have executed successfully.
+# Each check corresponds to a numbered item in the crosscheck list.
+# Results are collected into a summary table printed at the end.
+# A script that passes all checks prints only PASS lines.
+# Any FAIL or WARN line requires investigation before results are reported.
+# ==============================================================================
+
+# ── Helper: collect results rather than stop on first failure ─────────────────
+# Each check appends one row to `checks`: severity, id, description, detail.
+checks <- tibble::tibble(
+  severity    = character(),
+  id          = character(),
+  description = character(),
+  detail      = character()
+)
+
+flag <- function(severity, id, description, detail = "") {
+  checks <<- dplyr::bind_rows(
+    checks,
+    tibble::tibble(
+      severity    = severity,
+      id          = id,
+      description = description,
+      detail      = as.character(detail)
+    )
+  )
+}
+
+pass <- function(id, description, detail = "") flag("PASS", id, description, detail)
+warn <- function(id, description, detail = "") flag("WARN", id, description, detail)
+fail <- function(id, description, detail = "") flag("FAIL", id, description, detail)
+
+# ==============================================================================
+# CHECK 1 — Rows dropped by drop_na() on coordinates (CSV path)
+# We cannot rerun the CSV path here, but we can verify that no NA coordinates
+# survived into bee.data after loading.
+# ==============================================================================
+{
+  n_na_coords <- if (inherits(sf::st_geometry(bee.data), "sfc_POINT")) {
+    coords <- sf::st_coordinates(bee.data)
+    sum(is.na(coords[, 1]) | is.na(coords[, 2]))
+  } else {
+    0L  # polygon geometry: coordinate NAs not directly checkable this way
+  }
+
+  if (n_na_coords > 0) {
+    fail("1-coord-na",
+         "NA coordinates present in bee.data after loading",
+         glue::glue("{n_na_coords} cells have NA x or y — these were or will be dropped"))
+  } else {
+    pass("1-coord-na",
+         "No NA coordinates in bee.data",
+         glue::glue("{nrow(bee.data)} cells loaded"))
+  }
+}
+
+# ==============================================================================
+# CHECK 2 — NA values in richness and cwe
+# NA richness/cwe causes case_when() to silently assign cells to the catch-all
+# category ("Lower richness, protected") regardless of actual protection status.
+# ==============================================================================
+{
+  n_na_rich <- sum(is.na(bee_prot$richness))
+  n_na_cwe  <- sum(is.na(bee_prot$cwe))
+
+  if (n_na_rich > 0) {
+    fail("2-na-richness",
+         "NA values in richness column of bee_prot",
+         glue::glue("{n_na_rich} cells — silently misclassified by case_when()"))
+  } else {
+    pass("2-na-richness", "No NA values in richness",
+         glue::glue("n = {nrow(bee_prot)}"))
+  }
+
+  if (n_na_cwe > 0) {
+    fail("2-na-cwe",
+         "NA values in cwe column of bee_prot",
+         glue::glue("{n_na_cwe} cells — silently misclassified by case_when()"))
+  } else {
+    pass("2-na-cwe", "No NA values in cwe",
+         glue::glue("n = {nrow(bee_prot)}"))
+  }
+
+  # Secondary: confirm gap flags contain no NAs (NA propagation reached bee_gaps)
+  n_na_rich_gap <- sum(is.na(bee_gaps$rich_gap))
+  n_na_cwe_gap  <- sum(is.na(bee_gaps$cwe_gap))
+
+  if (n_na_rich_gap > 0 || n_na_cwe_gap > 0) {
+    fail("2-na-gap-flags",
+         "NA values in rich_gap or cwe_gap in bee_gaps",
+         glue::glue("rich_gap NAs: {n_na_rich_gap}, cwe_gap NAs: {n_na_cwe_gap}"))
+  } else {
+    pass("2-na-gap-flags", "No NA values in rich_gap or cwe_gap")
+  }
+}
+
+# ==============================================================================
+# CHECK 3 — Row count preserved by spatial-join deduplication
+# bee_prot should have exactly the same number of rows as bee.data.
+# Any excess indicates that slice(1) silently discarded duplicate matches.
+# ==============================================================================
+{
+  n_bee_data <- nrow(bee.data)
+  n_bee_prot <- nrow(bee_prot)
+
+  if (n_bee_prot != n_bee_data) {
+    fail("3-join-dedup",
+         "Row count changed after spatial-join deduplication",
+         glue::glue("bee.data: {n_bee_data} rows, bee_prot: {n_bee_prot} rows — ",
+                    "difference: {n_bee_prot - n_bee_data}"))
+  } else {
+    pass("3-join-dedup",
+         "Row count unchanged after spatial join",
+         glue::glue("{n_bee_prot} rows in bee_prot == {n_bee_data} rows in bee.data"))
+  }
+}
+
+# ==============================================================================
+# CHECK 4 — Gap1_acres and Gap2_acres column types in conserved
+# If stored as character, the filter (> 0) evaluates to NA, not FALSE, and
+# conserved_gap12 may be empty without any error.
+# ==============================================================================
+{
+  cls_gap1 <- class(conserved$Gap1_acres)
+  cls_gap2 <- class(conserved$Gap2_acres)
+  numeric_classes <- c("numeric", "integer", "double")
+
+  if (!cls_gap1 %in% numeric_classes) {
+    fail("4-acres-type",
+         "Gap1_acres is not numeric — filter(Gap1_acres > 0) may have failed silently",
+         glue::glue("class: {cls_gap1}"))
+  } else if (!cls_gap2 %in% numeric_classes) {
+    fail("4-acres-type",
+         "Gap2_acres is not numeric — filter(Gap2_acres > 0) may have failed silently",
+         glue::glue("class: {cls_gap2}"))
+  } else {
+    pass("4-acres-type",
+         "Gap1_acres and Gap2_acres are numeric",
+         glue::glue("classes: {cls_gap1}, {cls_gap2}"))
+  }
+
+  # Secondary: conserved_gap12 must be non-empty
+  if (nrow(conserved_gap12) == 0) {
+    fail("4-gap12-empty",
+         "conserved_gap12 is empty — no GAP 1 or 2 polygons found",
+         "Check column names and types in the 30x30 shapefile")
+  } else {
+    pass("4-gap12-empty",
+         "conserved_gap12 is non-empty",
+         glue::glue("{nrow(conserved_gap12)} polygons with GAP 1 or 2 acreage"))
+  }
+}
+
+# ==============================================================================
+# CHECK 5 — Zero or degenerate cell areas in sensitivity analysis
+# overlap_area is computed by calling sf::st_area() directly on
+# bee_gap12_intersections (assigned via $<- before the summarise pipe).
+# If any bee_cells polygon is degenerate (area = 0), dividing overlap_area
+# by cell_area produces NaN, which sum(..., na.rm = TRUE) silently excludes
+# from gap counts — understating the number of unprotected cells.
+# ==============================================================================
+{
+  if (exists("bee_cells") && "cell_area" %in% names(bee_cells)) {
+    n_zero_area <- sum(bee_cells$cell_area == 0, na.rm = TRUE)
+    n_na_area   <- sum(is.na(bee_cells$cell_area))
+
+    if (n_zero_area > 0) {
+      fail("5-zero-area",
+           "Degenerate polygons with cell_area == 0 in bee_cells",
+           glue::glue("{n_zero_area} cells — overlap_prop will be NaN for these"))
+    } else {
+      pass("5-zero-area", "No zero-area cells in bee_cells")
+    }
+
+    if (n_na_area > 0) {
+      fail("5-na-area",
+           "NA values in cell_area in bee_cells",
+           glue::glue("{n_na_area} cells"))
+    } else {
+      pass("5-na-area", "No NA values in cell_area in bee_cells")
+    }
+
+    # Check for NaN in overlap_prop — the downstream symptom of a zero cell_area.
+    # st_area() is called on bee_gap12_intersections directly (not inside mutate),
+    # so the area values themselves should always be non-negative numerics;
+    # NaN here means cell_area was zero, not that st_area() failed.
+    if (exists("bee_overlap") && "overlap_prop" %in% names(bee_overlap)) {
+      n_nan_prop <- sum(is.nan(sf::st_drop_geometry(bee_overlap)$overlap_prop))
+      if (n_nan_prop > 0) {
+        fail("5-nan-overlap-prop",
+             "NaN values in overlap_prop in bee_overlap",
+             glue::glue("{n_nan_prop} cells — caused by division by zero cell_area"))
+      } else {
+        pass("5-nan-overlap-prop", "No NaN values in overlap_prop")
+      }
+    }
+  } else {
+    warn("5-zero-area",
+         "bee_cells or cell_area not found — sensitivity chunk may not have run",
+         "Skipping check 5")
+  }
+}
+
+# ==============================================================================
+# CHECK 6 — CRS of bee.data and conserved_union
+# Both must be EPSG 3310 (CA Albers) for the spatial join to be valid.
+# ==============================================================================
+{
+  epsg_bee <- sf::st_crs(bee.data)$epsg
+
+  if (is.na(epsg_bee)) {
+    warn("6-crs-bee",
+         "bee.data CRS has no EPSG code — cannot confirm EPSG 3310",
+         glue::glue("CRS string: {sf::st_crs(bee.data)$input}"))
+  } else if (epsg_bee != 3310L) {
+    fail("6-crs-bee",
+         "bee.data is not in CA Albers (EPSG 3310) after st_transform",
+         glue::glue("Detected EPSG: {epsg_bee}"))
+  } else {
+    pass("6-crs-bee", "bee.data CRS confirmed as EPSG 3310 (CA Albers)")
+  }
+
+  epsg_union <- sf::st_crs(conserved_union)$epsg
+  if (!isTRUE(epsg_union == 3310L)) {
+    fail("6-crs-union",
+         "conserved_union is not in EPSG 3310",
+         glue::glue("Detected EPSG: {epsg_union}"))
+  } else {
+    pass("6-crs-union", "conserved_union CRS confirmed as EPSG 3310")
+  }
+}
+
+# ==============================================================================
+# CHECK 7 — conserved_union geometry is valid and non-empty
+# An empty or invalid dissolve means every bee cell gets is_protected = FALSE.
+# ==============================================================================
+{
+  union_empty <- sf::st_is_empty(conserved_union$geometry)
+  union_valid <- sf::st_is_valid(conserved_union$geometry)
+
+  if (any(union_empty)) {
+    fail("7-union-empty",
+         "conserved_union geometry is empty — all cells will appear unprotected",
+         "st_union() may have failed on invalid input geometries")
+  } else {
+    pass("7-union-empty", "conserved_union geometry is non-empty")
+  }
+
+  if (!all(union_valid)) {
+    fail("7-union-valid",
+         "conserved_union geometry is invalid",
+         "Run st_make_valid(conserved_union) and re-dissolve")
+  } else {
+    pass("7-union-valid", "conserved_union geometry is valid")
+  }
+}
+
+# ==============================================================================
+# CHECK 8 — Row count preserved by left_join in sensitivity chunk
+# bee_overlap must have exactly as many rows as bee_cells.
+# Extra rows mean overlap_by_cell had duplicate cell_ids, inflating gap counts.
+# ==============================================================================
+{
+  if (exists("bee_overlap") && exists("bee_cells")) {
+    n_cells   <- nrow(bee_cells)
+    n_overlap <- nrow(bee_overlap)
+
+    if (n_overlap != n_cells) {
+      fail("8-overlap-rowcount",
+           "Row count changed after left_join in sensitivity chunk",
+           glue::glue("bee_cells: {n_cells} rows, bee_overlap: {n_overlap} rows — ",
+                      "overlap_by_cell may contain duplicate cell_ids"))
+    } else {
+      pass("8-overlap-rowcount",
+           "Row count unchanged after sensitivity left_join",
+           glue::glue("{n_overlap} rows"))
+    }
+  } else {
+    warn("8-overlap-rowcount",
+         "bee_overlap or bee_cells not found — sensitivity chunk may not have run",
+         "Skipping check 8")
+  }
+}
+
+# ==============================================================================
+# CHECK 9 — Sensitivity 0% threshold matches main analysis dual-gap count
+# At 0% overlap, every intersecting cell is "protected" — identical to the
+# is_protected flag from spatial-join. The dual-gap count must therefore
+# equal dual_gap_n. A mismatch signals an artefact between the two pipelines.
+# ==============================================================================
+{
+  if (exists("gap_summary_sensitivity") && exists("dual_gap_n")) {
+    sens_dual_0 <- gap_summary_sensitivity |>
+      dplyr::filter(overlap_threshold == 0) |>
+      dplyr::pull(dual_gap_cells)
+
+    if (length(sens_dual_0) == 0) {
+      warn("9-sens-consistency",
+           "Could not find 0% threshold row in gap_summary_sensitivity",
+           "Check that overlap_thresholds includes 0.00")
+    } else if (sens_dual_0 != dual_gap_n) {
+      fail("9-sens-consistency",
+           "Dual-gap count at 0% overlap threshold does not match main analysis",
+           glue::glue("Main analysis dual_gap_n: {dual_gap_n}, ",
+                      "Sensitivity at 0%: {sens_dual_0} — ",
+                      "investigate geometry or join differences between pipelines"))
+    } else {
+      pass("9-sens-consistency",
+           "Sensitivity 0% dual-gap count matches main analysis",
+           glue::glue("Both = {dual_gap_n}"))
+    }
+  } else {
+    warn("9-sens-consistency",
+         "gap_summary_sensitivity or dual_gap_n not found",
+         "Skipping check 9 — ensure sensitivity chunk ran after gap-thresholds")
+  }
+}
+
+# ==============================================================================
+# CHECK 10 — YAML execute:message:false suppresses diagnostic output
+# This cannot be tested in R, but is flagged as a reminder so it appears in
+# the validation output and is not overlooked before submission.
+# ==============================================================================
+{
+  warn("10-message-suppressed",
+       "YAML execute: message: false suppresses all message() output in rendered HTML",
+       paste0("Verify counts manually before submission, or use message: true ",
+              "during review and cat() for counts that must appear in the final document"))
+}
+
+# ==============================================================================
+# CHECK 11 — Multiple shapefiles in the conserved areas zip
+# If > 1 .shp was found, conserved_path[1] was used silently.
+# ==============================================================================
+{
+  if (exists("conserved_dir") && dir.exists(conserved_dir)) {
+    all_shp <- list.files(
+      conserved_dir,
+      pattern     = "\\.shp$",
+      full.names  = TRUE,
+      recursive   = TRUE,
+      ignore.case = TRUE
+    )
+    if (length(all_shp) > 1) {
+      warn("11-multi-shp",
+           "Multiple .shp files found in zip — only the first was read",
+           glue::glue("Files: {paste(basename(all_shp), collapse = ', ')}"))
+    } else if (length(all_shp) == 1) {
+      pass("11-multi-shp",
+           "Exactly one .shp file in conserved areas zip",
+           glue::glue("File: {basename(all_shp)}"))
+    } else {
+      warn("11-multi-shp",
+           "No .shp files found when rechecking conserved_dir",
+           "Temp directory may have been cleaned; verify manually")
+    }
+  } else {
+    warn("11-multi-shp",
+         "Temp directory conserved_dir no longer exists — cannot recheck zip contents",
+         "Acceptable if tempfiles were cleaned; verify manually if in doubt")
+  }
+}
+
+# ==============================================================================
+# CHECK 12 — Double-counting of acres where both Gap1_acres and Gap2_acres > 0
+# Affects only the summary message, not the analysis, but flags for awareness.
+# ==============================================================================
+{
+  n_both <- sum(
+    conserved_gap12$Gap1_acres > 0 & conserved_gap12$Gap2_acres > 0,
+    na.rm = TRUE
+  )
+  if (n_both > 0) {
+    warn("12-acres-double",
+         "Parcels with both Gap1_acres > 0 and Gap2_acres > 0 exist",
+         glue::glue("{n_both} parcels — the GAP 1 & 2 acreage summary message ",
+                    "may overstate protected area. Analysis unaffected."))
+  } else {
+    pass("12-acres-double",
+         "No parcels with both Gap1_acres and Gap2_acres > 0",
+         "Acreage summary message is not double-counting")
+  }
+}
+
+# ==============================================================================
+# CHECK 13 — dual_gap object exists and count matches gap-thresholds
+# The summary-overlap chunk creates dual_gap and reports its count via cat()
+# (not message(), which is suppressed by execute: message: false) and renders
+# a knitr::kable() to ensure the chunk always produces visible output.
+# A mismatch in counts signals that bee_gaps was modified between chunks.
+# ==============================================================================
+{
+  if (!exists("dual_gap")) {
+    fail("13-dual-gap-exists",
+         "Object 'dual_gap' not found — summary-overlap chunk did not run",
+         paste0("The chunk now uses cat() and knitr::kable() to force visible output. ",
+                "If dual_gap is still missing, check for an error in that chunk."))
+  } else {
+    n_dual_overlap <- nrow(dual_gap)
+    if (n_dual_overlap != dual_gap_n) {
+      fail("13-dual-gap-count",
+           "dual_gap row count does not match dual_gap_n from gap-thresholds",
+           glue::glue("dual_gap rows: {n_dual_overlap}, dual_gap_n: {dual_gap_n} — ",
+                      "bee_gaps may have been modified between the two chunks"))
+    } else {
+      pass("13-dual-gap-count",
+           "dual_gap exists and count matches gap-thresholds",
+           glue::glue("n = {n_dual_overlap}"))
+    }
+  }
+}
+
+# ==============================================================================
+# SUMMARY TABLE
+# ==============================================================================
+
+# ── Console output (always visible, not affected by message: false) ────────────
+cat("\n")
+cat("=======================================================================\n")
+cat("  DATA INTEGRITY VALIDATION SUMMARY\n")
+cat("=======================================================================\n\n")
+
+n_fail <- sum(checks$severity == "FAIL")
+n_warn <- sum(checks$severity == "WARN")
+n_pass <- sum(checks$severity == "PASS")
+
+ordered_checks <- dplyr::bind_rows(
+  dplyr::filter(checks, severity == "FAIL"),
+  dplyr::filter(checks, severity == "WARN"),
+  dplyr::filter(checks, severity == "PASS")
+)
+
+for (i in seq_len(nrow(ordered_checks))) {
+  row <- ordered_checks[i, ]
+  prefix <- switch(row$severity,
+    "FAIL" = "[ FAIL ]",
+    "WARN" = "[ WARN ]",
+    "PASS" = "[ pass ]"
+  )
+  cat(sprintf("%-10s  %s — %s\n", prefix, row$id, row$description))
+  if (nchar(row$detail) > 0) {
+    detail_wrapped <- strwrap(row$detail, width = 68,
+                              prefix = "             ")
+    cat(paste(detail_wrapped, collapse = "\n"), "\n")
+  }
+  cat("\n")
+}
+
+cat("-----------------------------------------------------------------------\n")
+cat(sprintf("  %d FAIL   %d WARN   %d pass   (%d checks total)\n\n",
+            n_fail, n_warn, n_pass, nrow(checks)))
+
+if (n_fail > 0) {
+  cat("  ACTION REQUIRED: resolve all FAIL items before reporting results.\n")
+} else if (n_warn > 0) {
+  cat("  Review WARN items and confirm they are acceptable before submission.\n")
+} else {
+  cat("  All checks passed. Proceed to submission.\n")
+}
+cat("=======================================================================\n\n")
+
+# ── HTML table (rendered document) ────────────────────────────────────────────
+# Row indices for conditional colouring must be computed on the ordered frame
+fail_rows <- which(ordered_checks$severity == "FAIL")
+warn_rows <- which(ordered_checks$severity == "WARN")
+
+ordered_checks |>
+  dplyr::select(severity, id, description, detail) |>
+  knitr::kable(
+    caption   = "Data integrity validation results",
+    col.names = c("Status", "Check ID", "Description", "Detail"),
+    align     = c("c", "l", "l", "l")
+  ) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "condensed", "bordered"),
+    full_width        = TRUE,
+    font_size         = 11
+  ) |>
+  kableExtra::row_spec(fail_rows, background = "#fde8e8", bold = TRUE) |>
+  kableExtra::row_spec(warn_rows, background = "#fff8e1")
+```

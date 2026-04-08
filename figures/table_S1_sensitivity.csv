@@ -1,0 +1,5 @@
+"Overlap threshold","Total cells","Protected cells","Unprotected cells","% Protected","Richness gap cells","Endemism gap cells","Dual-gap cells"
+"25%",1679,733,946,43.7,212,201,64
+"50%",1679,484,1195,28.8,283,268,100
+"75%",1679,315,1364,18.8,334,316,123
+"100%",1679,16,1663,1,423,417,172

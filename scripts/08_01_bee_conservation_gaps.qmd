@@ -1,0 +1,1557 @@
+---
+title: "California Bee Diversity & Conservation Gaps"
+author: "Gretchen LeBuhn"
+date: "`r Sys.Date()`"
+format:
+  html:
+    self-contained: true
+    toc: true
+    toc-depth: 4
+    theme: sandstone
+    code-fold: true
+    fig-width: 12
+    fig-height: 8
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+This document overlays California bee species richness and endemism (CWE) data
+with the CA Nature Terrestrial 30×30 Conserved Areas layer to identify
+**conservation gaps** — areas of high bee diversity or endemism that fall
+outside GAP Status 1 & 2 protected lands.
+
+Five maps are produced:
+
+1. Bee richness overlaid on conserved lands
+2. Bee endemism (CWE) overlaid on conserved lands
+3. Conservation gaps — high richness, low protection
+4. Conservation gaps — high endemism, low protection
+5. Dual-gap priority cells — high in both richness and endemism, unprotected
+
+A sensitivity analysis examines how gap counts change when the minimum
+areal-overlap threshold required to classify a cell as "protected" is varied
+from 0% to 50%.
+
+------------------------------------------------------------------------
+
+## Setup
+
+All required packages are loaded here. `kableExtra` is included for
+publication-quality table formatting in the sensitivity analysis.
+The `data_dir` path points to the `bees_climate/data/` sibling directory
+relative to this script.
+
+```{r setup}
+library(readr)       # fast CSV reading with clean column typing
+library(dplyr)       # data manipulation verbs (filter, mutate, summarise)
+library(tidyverse)   # meta-package: ggplot2, tidyr, stringr, purrr, etc.
+library(sf)          # simple features: read, transform, and join spatial data
+library(ggplot2)     # layer-by-layer map and figure construction
+library(viridis)     # perceptually uniform, colorblind-safe colour palettes
+library(patchwork)   # combine multiple ggplot objects into one figure
+library(scales)      # format axis labels and legend text
+library(glue)        # string interpolation for message() and labels
+library(tigris)      # Census Bureau CA state boundary for map outlines
+library(kableExtra)  # styled HTML tables with column spanners and footnotes
+
+# All data files live in bees_climate/data/, one level above this script
+data_dir <- file.path("..", "data")
+```
+
+------------------------------------------------------------------------
+
+## Load Data
+
+The two data-loading chunks below are independent of each other and are kept
+separate so that each data source is clearly documented on its own. Both are
+reprojected to CA Albers (EPSG 3310, units in metres) immediately on load so
+that every subsequent spatial operation uses a consistent coordinate system.
+
+### Bee diversity data
+
+The processed bee data contains ecoregion assignments and grid-cell centroids
+in CA Albers (EPSG 3310). The script prefers the GeoPackage (which preserves
+geometry and CRS exactly) and falls back to the CSV if the GeoPackage is
+absent.
+
+```{r load-bee-data}
+processed_dir <- file.path(data_dir, "processed")
+gpkg_path     <- file.path(processed_dir, "eco.data.gpkg")
+csv_path      <- file.path(processed_dir, "eco.data.csv")
+
+if (file.exists(gpkg_path)) {
+
+  bee.data <- st_read(gpkg_path, quiet = TRUE)
+  message("Loaded bee data from GeoPackage: ", gpkg_path)
+
+} else if (file.exists(csv_path)) {
+
+  message("GeoPackage not found — loading from CSV: ", csv_path)
+
+  bee.data <- read_csv(csv_path, show_col_types = FALSE) |>
+    rename(x.axis = X_Axis_0_, y.axis = X_Axis_1_,
+           cwe = X_ENDC_CWE_, richness = X_ENDC_RICHNESS_) |>
+    select(x.axis, y.axis, cwe, richness,
+           starts_with("bio"), starts_with("L")) |>
+    drop_na(x.axis, y.axis) |>
+    st_as_sf(coords = c("x.axis", "y.axis"), crs = 3310)
+
+} else {
+  stop(
+    "Neither eco.data.gpkg nor eco.data.csv found in: ", processed_dir,
+    "\nCheck that bees_climate/data/processed/ contains the bee data files."
+  )
+}
+
+bee.data <- st_transform(bee.data, crs = 3310)
+
+message(glue(
+  "Bee data: {nrow(bee.data)} grid cells | ",
+  "Richness range: {round(min(bee.data$richness, na.rm=TRUE), 1)} – ",
+  "{round(max(bee.data$richness, na.rm=TRUE), 1)} | ",
+  "CWE range: {round(min(bee.data$cwe, na.rm=TRUE), 3)} – ",
+  "{round(max(bee.data$cwe, na.rm=TRUE), 3)}"
+))
+```
+
+### 30×30 Conserved Areas shapefile
+
+The CA Nature Terrestrial 30×30 layer is distributed as a zip archive.
+The chunk below locates the zip in `bees_climate/data/`, extracts it to a
+temporary directory, and reads the shapefile into R. Update
+`conserved_zip_name` if your downloaded file has a different name.
+
+```{r load-conserved}
+conserved_zip_name <- "30x30_Conserved_Areas, Terrestrial_(2025).zip"
+zip_path           <- file.path(data_dir, conserved_zip_name)
+
+# Also try the URL-encoded variant (some systems save commas as %2C)
+if (!file.exists(zip_path)) {
+  zip_path_encoded <- file.path(
+    data_dir,
+    "30x30_Conserved_Areas%2C_Terrestrial_(2025).zip"
+  )
+  if (file.exists(zip_path_encoded)) {
+    zip_path <- zip_path_encoded
+  } else {
+    stop(
+      "Conserved areas zip not found.\n",
+      "Expected at: ", file.path(data_dir, conserved_zip_name), "\n",
+      "Check that bees_climate/data/ contains the 30x30 zip file."
+    )
+  }
+}
+
+message("Reading conserved areas from: ", zip_path)
+
+conserved_dir <- tempfile("conserved_")
+dir.create(conserved_dir)
+unzip(zip_path, exdir = conserved_dir)
+
+conserved_path <- list.files(
+  conserved_dir,
+  pattern     = "\\.shp$",
+  full.names  = TRUE,
+  recursive   = TRUE,
+  ignore.case = TRUE
+)
+
+stopifnot(
+  "No .shp file found after unzipping — check the zip contents" =
+    length(conserved_path) >= 1
+)
+
+conserved_path <- conserved_path[1]
+message("Reading shapefile from: ", conserved_path)
+
+conserved <- st_read(conserved_path, quiet = TRUE) |>
+  st_transform(crs = 3310)
+
+message(glue("Conserved areas: {nrow(conserved)} polygons loaded."))
+```
+
+------------------------------------------------------------------------
+
+## Prepare Conserved Areas
+
+GAP Status codes indicate the management intent of a protected area:
+
+- **GAP 1** — permanently protected, primary biodiversity focus
+- **GAP 2** — managed mostly for biodiversity but may allow some extractive use
+- **GAP 3** — multiple use, biodiversity not primary focus
+- **GAP 4** — no known biodiversity focus (e.g. working lands)
+
+This analysis defines "well conserved" as GAP 1 or GAP 2. Polygons with any
+GAP 1 or GAP 2 acreage are filtered, their geometries are repaired with
+`st_make_valid()`, and then dissolved into a single unified polygon with
+`st_union()`. Dissolving before the spatial join (next chunk) is critical for
+performance: joining against one polygon is orders of magnitude faster than
+joining against tens of thousands of individual parcels.
+
+```{r prep-conserved}
+conserved_gap12 <- conserved |>
+  filter(Gap1_acres > 0 | Gap2_acres > 0)
+
+message(glue(
+  "Invalid geometries before repair: {sum(!st_is_valid(conserved_gap12))}"
+))
+
+# Drop Z/M coordinates (some shapefiles carry elevation or measure values that
+# can cause st_make_valid() to behave unexpectedly) then repair
+conserved_gap12 <- conserved_gap12 |>
+  mutate(geometry = st_zm(geometry, drop = TRUE, what = "ZM")) |>
+  mutate(geometry = st_make_valid(geometry))
+
+message(glue(
+  "Invalid geometries after repair:  {sum(!st_is_valid(conserved_gap12))}"
+))
+
+message("Dissolving GAP 1 & 2 areas... (may take a moment)")
+
+conserved_union <- conserved_gap12 |>
+  summarise(geometry = st_union(geometry)) |>
+  mutate(protected = "GAP 1 & 2")
+
+gap12_acres <- sum(
+  conserved_gap12$Gap1_acres + conserved_gap12$Gap2_acres,
+  na.rm = TRUE
+)
+message(glue("GAP 1 & 2 coverage: {round(gap12_acres / 1e6, 2)} million acres"))
+```
+
+------------------------------------------------------------------------
+
+## Classify Bee Cells by Protection Status
+
+This chunk performs the core spatial join that every downstream analysis
+depends on. Each 15 × 15 km bee grid cell is tested for intersection with the
+dissolved GAP 1 & 2 polygon, and a logical `is_protected` column is added.
+
+A left join is used so that cells with no overlap (i.e. entirely outside
+protected lands) are retained with `NA` for the `protected` attribute, which
+is then recoded to `FALSE`. This produces `bee_prot`, the single source of
+protection-status truth used by both `gap-thresholds` and the sensitivity
+analysis, eliminating the need for either chunk to recompute the intersection
+independently.
+
+```{r spatial-join}
+bee_prot <- bee.data |>
+  mutate(cell_id = row_number()) |>
+  # Left join: every bee cell is kept; cells outside conserved areas get NA
+  st_join(conserved_union["protected"], join = st_intersects, left = TRUE) |>
+  # Guard against artefacts where one cell matches multiple polygons
+  # (should not occur after dissolving, but handled defensively)
+  group_by(cell_id) |>
+  slice(1) |>
+  ungroup() |>
+  # A non-NA 'protected' value means the cell overlaps GAP 1 & 2 land
+  mutate(is_protected = !is.na(protected))
+
+n_prot   <- sum(bee_prot$is_protected)
+n_unprot <- sum(!bee_prot$is_protected)
+
+message(glue(
+  "Protection status: {n_prot} cells overlap GAP 1 & 2 ",
+  "({round(100 * n_prot / nrow(bee_prot), 1)}%), ",
+  "{n_unprot} cells unprotected ",
+  "({round(100 * n_unprot / nrow(bee_prot), 1)}%)"
+))
+```
+
+------------------------------------------------------------------------
+
+## Define Conservation Gap Thresholds
+
+"High" richness and endemism are defined as cells at or above the **75th
+percentile** of their respective distributions across all California grid cells.
+This threshold captures the top quarter of biodiversity values while retaining
+enough cells to be spatially meaningful. The quantile value is set via
+`gap_quantile` and can be adjusted (e.g. to 0.90 for a more stringent
+definition) without changing any other code.
+
+The four priority categories assigned to each cell — high/lower richness or
+endemism crossed with protected/unprotected — are used to colour all subsequent
+maps.
+
+```{r gap-thresholds}
+# Adjust this value to change the definition of "high" biodiversity
+gap_quantile <- 0.75
+
+rich_thresh <- quantile(bee.data$richness, gap_quantile, na.rm = TRUE)
+cwe_thresh  <- quantile(bee.data$cwe,      gap_quantile, na.rm = TRUE)
+
+message(glue(
+  "Richness threshold (≥{gap_quantile*100}th pctile): {round(rich_thresh, 1)} species\n",
+  "CWE threshold     (≥{gap_quantile*100}th pctile): {round(cwe_thresh, 4)}"
+))
+
+# Build the gap-classified data frame from bee_prot (created in spatial-join)
+bee_gaps <- bee_prot |>
+  mutate(
+    # Conservation gap flags: high diversity AND unprotected
+    rich_gap = richness >= rich_thresh & !is_protected,
+    cwe_gap  = cwe      >= cwe_thresh  & !is_protected,
+
+    # Four-category richness × protection label for map colouring
+    rich_priority = case_when(
+      richness >= rich_thresh & !is_protected ~ "High richness, unprotected",
+      richness >= rich_thresh &  is_protected ~ "High richness, protected",
+      richness <  rich_thresh & !is_protected ~ "Lower richness, unprotected",
+      TRUE                                    ~ "Lower richness, protected"
+    ),
+
+    # Four-category endemism × protection label for map colouring
+    cwe_priority = case_when(
+      cwe >= cwe_thresh & !is_protected ~ "High endemism, unprotected",
+      cwe >= cwe_thresh &  is_protected ~ "High endemism, protected",
+      cwe <  cwe_thresh & !is_protected ~ "Lower endemism, unprotected",
+      TRUE                              ~ "Lower endemism, protected"
+    )
+  )
+
+dual_gap_n <- sum(bee_gaps$rich_gap & bee_gaps$cwe_gap)
+message(glue("Dual-gap cells (high richness AND endemism, unprotected): {dual_gap_n}"))
+```
+
+------------------------------------------------------------------------
+
+## Sensitivity Analysis: Areal Overlap Thresholds
+
+The binary protection classification above (`is_protected` = any intersection)
+is the most inclusive possible definition. In practice, a bee grid cell might
+overlap a protected area only at a corner, raising the question of whether it
+should truly be counted as "protected." This section tests how gap counts
+change when a minimum areal overlap threshold is required — specifically 0%
+(any overlap, matching the main analysis), 25%, and 50%.
+
+Because `bee_prot` is now available from the `spatial-join` chunk, the
+sensitivity analysis can extend that object directly rather than recomputing
+the intersection from scratch. The spatial intersection is run once to obtain
+the overlap area of each cell with GAP 1 & 2 land; cells are then
+reclassified under each threshold and gap counts are summarised.
+
+The output is a single merged table formatted for direct inclusion in a
+manuscript supplement.
+
+```{r sensitivity-overlap-thresholds}
+# ── Overlap thresholds to compare ─────────────────────────────────────────────
+overlap_thresholds <- c(1.00, 0.75, 0.50, 0.25)
+
+# Biodiversity thresholds mirror the main analysis (gap_quantile defined above)
+rich_thresh_sens <- rich_thresh
+cwe_thresh_sens  <- cwe_thresh
+
+# ── Construct 15 km square polygon cells ──────────────────────────────────────
+# The main analysis stores bee locations as points. For areal overlap we need
+# polygons. st_buffer with endCapStyle = "SQUARE" produces axis-aligned squares.
+bee_cells   <- bee_prot
+cell_size_m <- 15000
+
+geom_class <- class(sf::st_geometry(bee_cells))[[1]]
+
+if (geom_class %in% c("sfc_POINT", "sfc_MULTIPOINT")) {
+  message("bee_prot is point geometry — constructing 15 km square polygons.")
+  sf::st_geometry(bee_cells) <- sf::st_buffer(
+    sf::st_geometry(bee_cells),
+    dist        = cell_size_m / 2,
+    endCapStyle = "SQUARE"
+  )
+} else if (geom_class %in% c("sfc_POLYGON", "sfc_MULTIPOLYGON")) {
+  message("bee_prot already has polygon geometry — using supplied polygons.")
+} else {
+  stop("Unsupported geometry type: ", geom_class)
+}
+
+sf::st_geometry(bee_cells) <- sf::st_make_valid(sf::st_geometry(bee_cells))
+bee_cells$cell_area <- as.numeric(sf::st_area(bee_cells))
+
+# ── Compute overlap area between each bee cell and the dissolved GAP 1/2 layer
+# st_intersection clips each bee cell to the extent of the conserved union,
+# producing a geometry whose area is the actual overlap.
+bee_gap12_intersections <- suppressWarnings(suppressMessages(
+  sf::st_intersection(
+    bee_cells[, c("cell_id", "cell_area")],
+    conserved_union["protected"]
+  )
+))
+
+if (nrow(bee_gap12_intersections) > 0) {
+  # Compute area outside mutate() to avoid pipe-placeholder issues with |>
+  bee_gap12_intersections$overlap_area <- as.numeric(
+    sf::st_area(bee_gap12_intersections)
+  )
+  overlap_by_cell <- bee_gap12_intersections |>
+    sf::st_drop_geometry() |>
+    dplyr::group_by(cell_id) |>
+    dplyr::summarise(overlap_area = sum(overlap_area, na.rm = TRUE),
+                     .groups = "drop")
+} else {
+  overlap_by_cell <- tibble::tibble(
+    cell_id      = integer(),
+    overlap_area = numeric()
+  )
+}
+
+# Join overlap areas back to bee cells and compute the overlap proportion
+bee_overlap <- bee_cells |>
+  dplyr::left_join(overlap_by_cell, by = "cell_id") |>
+  dplyr::mutate(
+    overlap_area = tidyr::replace_na(overlap_area, 0),
+    overlap_prop = pmin(overlap_area / cell_area, 1)  # cap at 1.0
+  )
+
+message(glue(
+  "Overlap proportion — min: {round(min(bee_overlap$overlap_prop), 3)}, ",
+  "median: {round(median(bee_overlap$overlap_prop), 3)}, ",
+  "max: {round(max(bee_overlap$overlap_prop), 3)}"
+))
+
+# ── Reclassify protection and gap status under each threshold ──────────────────
+# map_dfr iterates over each threshold value and returns a single stacked
+# data frame with a column recording which threshold each row belongs to.
+bee_overlap_long <- purrr::map_dfr(overlap_thresholds, function(thresh) {
+  bee_overlap |>
+    sf::st_drop_geometry() |>
+    dplyr::mutate(
+      overlap_threshold   = thresh,
+      threshold_label     = scales::percent(thresh, accuracy = 1),
+      is_protected_thresh = overlap_prop >= thresh,
+      rich_gap_thresh     = richness >= rich_thresh_sens & !is_protected_thresh,
+      cwe_gap_thresh      = cwe      >= cwe_thresh_sens  & !is_protected_thresh,
+      dual_gap_thresh     = rich_gap_thresh & cwe_gap_thresh
+    )
+})
+
+# ── Summary table 1: protection status by threshold ───────────────────────────
+prot_summary_sensitivity <- bee_overlap_long |>
+  dplyr::group_by(overlap_threshold, threshold_label) |>
+  dplyr::summarise(
+    n_cells_total       = dplyr::n(),
+    n_cells_protected   = sum(is_protected_thresh, na.rm = TRUE),
+    n_cells_unprotected = sum(!is_protected_thresh, na.rm = TRUE),
+    pct_cells_protected = round(100 * mean(is_protected_thresh, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) |>
+  dplyr::arrange(overlap_threshold)
+
+# ── Summary table 2: gap counts by threshold ──────────────────────────────────
+gap_summary_sensitivity <- bee_overlap_long |>
+  dplyr::group_by(overlap_threshold, threshold_label) |>
+  dplyr::summarise(
+    rich_gap_cells = sum(rich_gap_thresh,  na.rm = TRUE),
+    cwe_gap_cells  = sum(cwe_gap_thresh,   na.rm = TRUE),
+    dual_gap_cells = sum(dual_gap_thresh,  na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  dplyr::arrange(overlap_threshold)
+
+# ── Combined publication table ─────────────────────────────────────────────────
+# The two summaries are merged into a single wide table and formatted with
+# kableExtra for manuscript submission. Column spanners distinguish cell-count
+# columns from gap-count columns; a footnote provides the full methodological
+# context needed to interpret the table without reference to the main text.
+combined_sensitivity <- prot_summary_sensitivity |>
+  dplyr::left_join(
+    gap_summary_sensitivity,
+    by = c("overlap_threshold", "threshold_label")
+  ) |>
+  dplyr::transmute(
+    `Overlap threshold`  = threshold_label,
+    `Total cells`        = n_cells_total,
+    `Protected cells`    = n_cells_protected,
+    `Unprotected cells`  = n_cells_unprotected,
+    `% Protected`        = pct_cells_protected,
+    `Richness gap cells` = rich_gap_cells,
+    `Endemism gap cells` = cwe_gap_cells,
+    `Dual-gap cells`     = dual_gap_cells
+  )
+
+knitr::kable(
+  combined_sensitivity,
+  caption = paste0(
+    "Table S1. Sensitivity of conservation gap counts to minimum areal overlap ",
+    "threshold with GAP Status 1 & 2 protected lands. ",
+    "A cell is classified as 'protected' only if the stated proportion of its ",
+    "15 × 15 km area overlaps with GAP 1 or 2 lands. ",
+    "'Richness gap' = high species richness (≥ 75th percentile) and unprotected. ",
+    "'Endemism gap' = high corrected weighted endemism (CWE; ≥ 75th percentile) ",
+    "and unprotected. ",
+    "'Dual-gap' = high in both richness and endemism and unprotected."
+  ),
+  align       = c("l", rep("r", 7)),
+  format.args = list(big.mark = ",")
+) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "bordered"),
+    full_width        = TRUE,
+    font_size         = 12
+  ) |>
+  kableExtra::add_header_above(
+    c(" " = 1, "Cell counts" = 4, "Conservation gaps" = 3),
+    bold = TRUE
+  ) |>
+  kableExtra::row_spec(0, bold = TRUE) |>
+  kableExtra::footnote(
+    general = paste0(
+      "Bee grid cells are 15 × 15 km. ",
+      "GAP 1 & 2 protected lands from CA Nature Terrestrial 30×30 Conserved Areas ",
+      "(GreenInfo Network / USGS PAD-US, 2024). ",
+      "Biodiversity thresholds: species richness ≥ ",
+      round(rich_thresh_sens, 1), " spp and CWE ≥ ",
+      round(cwe_thresh_sens, 4),
+      " (75th percentile across all grid cells)."
+    ),
+    general_title     = "Note:",
+    footnote_as_chunk = TRUE
+  )
+
+# Retain the spatial version for optional downstream GIS export
+bee_overlap_sf <- bee_overlap |>
+  dplyr::mutate(
+    is_protected_0  = overlap_prop >= 0.00,
+    is_protected_25 = overlap_prop >= 0.25,
+    is_protected_50 = overlap_prop >= 0.50
+  )
+
+message(glue(
+  "Created: bee_overlap, bee_overlap_long, bee_overlap_sf, ",
+  "prot_summary_sensitivity, gap_summary_sensitivity, combined_sensitivity"
+))
+
+# Export sensitivity table as CSV for import into Word or Excel
+write.csv(
+  combined_sensitivity,
+  file.path("..", "figures", "table_S1_sensitivity.csv"),
+  row.names = FALSE
+)
+
+# Export as a formatted Word-ready table via flextable
+# install.packages("flextable") if not already installed
+library(flextable)
+
+ft <- flextable(combined_sensitivity) |>
+  set_caption("Table S1. Sensitivity of conservation gap counts to minimum areal overlap threshold") |>
+  add_header_row(
+    values = c("", "Cell counts", "Conservation gaps"),
+    colwidths = c(1, 4, 3)
+  ) |>
+  bold(part = "header") |>
+  align(align = "right", part = "body") |>
+  align(j = 1, align = "left", part = "body") |>
+  autofit()
+
+save_as_docx(ft, path = file.path("..", "figures", "table_S1_sensitivity.docx"))
+```
+
+------------------------------------------------------------------------
+
+## Maps
+
+### Shared map elements
+
+Before drawing individual maps, this chunk defines three reusable objects that
+are composed into every panel:
+
+- `map_theme` — a publication-ready ggplot theme (white background, clean
+  typography, bottom legend) that conforms to most ecology journal figure
+  standards.
+- `ca_outline_layer` — a dark grey California state boundary, downloaded from
+  the Census Bureau via `tigris` and reprojected to CA Albers. A convex hull
+  of the conserved areas is used as a fallback if `tigris` fails.
+- `conserved_base` — a light grey-green fill layer showing GAP 1 & 2 parcels,
+  drawn beneath all data layers so the conservation footprint provides context
+  without obscuring bee diversity values.
+
+All colours are chosen to be distinguishable under common forms of
+colour-vision deficiency and to reproduce clearly in greyscale, following the
+Wong (2011) palette.
+
+```{r map-theme}
+bg_col       <- "#ffffff"
+text_col     <- "#1a1a1a"
+subtitle_col <- "#555555"
+border_col   <- "#333333"
+
+map_theme <- theme_void(base_size = 11) +
+  theme(
+    plot.background  = element_rect(fill = bg_col, color = NA),
+    panel.background = element_rect(fill = bg_col, color = NA),
+    plot.title    = element_text(color = text_col, face = "bold",
+                                 size = 12, margin = margin(b = 4)),
+    plot.subtitle = element_text(color = subtitle_col, size = 9,
+                                 margin = margin(b = 8)),
+    legend.position    = "bottom",
+    legend.direction   = "horizontal",
+    legend.title       = element_text(color = text_col, size = 9, face = "bold"),
+    legend.text        = element_text(color = text_col, size = 8),
+    legend.background  = element_rect(fill = bg_col, color = NA),
+    legend.key         = element_rect(fill = bg_col, color = NA),
+    legend.key.width   = unit(1.5, "cm"),
+    legend.key.height  = unit(0.35, "cm"),
+    plot.margin = margin(6, 8, 6, 8)
+  )
+
+ca_outline_layer <- tryCatch({
+  ca_state <- tigris::states(cb = TRUE, progress_bar = FALSE) |>
+    dplyr::filter(STUSPS == "CA") |>
+    sf::st_transform(crs = 3310)
+  list(
+    geom_sf(data = ca_state, fill = NA, color = border_col, linewidth = 0.4),
+    coord_sf(expand = FALSE)
+  )
+}, error = function(e) {
+  ca_hull <- sf::st_union(conserved |> sf::st_make_valid()) |>
+    sf::st_convex_hull()
+  list(
+    geom_sf(data = ca_hull, fill = NA, color = border_col, linewidth = 0.4),
+    coord_sf(expand = FALSE)
+  )
+})
+
+# Light warm grey: neutral "land cover" feel, does not compete with data scales
+conserved_base <- geom_sf(
+  data  = conserved_gap12,
+  fill  = "#c8cfc8",
+  color = NA,
+  alpha = 0.80
+)
+```
+
+------------------------------------------------------------------------
+
+### Map 1 — Bee Species Richness Overlaid on Conserved Lands
+
+Map 1 shows the raw species richness of each grid cell, coloured using the
+viridis palette (purple = low, yellow = high). GAP 1 & 2 conserved lands
+appear as a light grey background layer. This map communicates the overall
+spatial pattern of bee diversity across California before any gap
+classification is applied.
+
+```{r map-richness-overlay, fig.alt="Bee richness across California with GAP 1 & 2 conserved areas shown in gray"}
+map1 <- ggplot() +
+  conserved_base +
+  ca_outline_layer +
+  geom_sf(
+    data  = bee.data,
+    aes(color = richness),
+    size  = 1.0,
+    alpha = 0.85,
+    shape = 16
+  ) +
+  scale_color_viridis_c(
+    option    = "viridis",
+    direction = 1,
+    name      = "Species richness",
+    labels    = label_number(accuracy = 1),
+    guide     = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                               barwidth = 12, barheight = 0.4)
+  ) +
+  labs(
+    title    = "Bee Species Richness Across California",
+    subtitle = "Light grey = GAP 1 & 2 conserved lands  ·  Points = bee survey grid cells"
+  ) +
+  map_theme
+
+map1
+```
+
+------------------------------------------------------------------------
+
+### Map 2 — Bee Endemism (CWE) Overlaid on Conserved Lands
+
+Map 2 shows corrected weighted endemism (CWE), a metric that upweights
+species with restricted geographic ranges. A high CWE value indicates that a
+grid cell harbours a disproportionate share of range-restricted bee species —
+the kind of diversity that cannot be recovered if a site is lost. The mako
+palette (distinct from viridis on Map 1) makes the two maps visually
+distinguishable in multi-panel figures.
+
+```{r map-cwe-overlay, fig.alt="Bee endemism (CWE) across California with GAP 1 & 2 conserved areas shown in gray"}
+map2 <- ggplot() +
+  conserved_base +
+  ca_outline_layer +
+  geom_sf(
+    data  = bee.data,
+    aes(color = cwe),
+    size  = 1.0,
+    alpha = 0.85,
+    shape = 16
+  ) +
+  scale_color_viridis_c(
+    option    = "mako",
+    direction = 1,
+    name      = "Bee rarity (CWE)",
+    labels    = label_number(accuracy = 0.001),
+    guide     = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                               barwidth = 12, barheight = 0.4)
+  ) +
+  labs(
+    title    = "Bee Rarity (Community-Weighted Endemism) Across California",
+    subtitle = "Light grey = GAP 1 & 2 conserved lands  ·  CWE highlights range-restricted species"
+  ) +
+  map_theme
+
+map2
+```
+
+------------------------------------------------------------------------
+
+### Map 3 — Conservation Gap: High Richness, Unprotected
+
+Map 3 is the first gap map. Cells are divided into four categories based on
+whether their richness exceeds the 75th-percentile threshold and whether they
+fall inside or outside GAP 1 & 2 lands. The key category — high richness AND
+unprotected (orange/vermillion) — represents locations where the conservation
+network fails to capture above-average bee diversity. Gap cells are rendered
+on top of non-gap cells and at larger point size to ensure they are legible at
+publication resolution.
+
+```{r map-richness-gap, fig.alt="Conservation gap map showing high bee richness areas outside GAP 1 & 2 lands"}
+# Vermillion for the gap (Wong 2011 colorblind-safe palette),
+# blue for protected high-richness cells, greys for background
+gap_colors_rich <- c(
+  "High richness, unprotected"   = "#D55E00",
+  "High richness, protected"     = "#0072B2",
+  "Lower richness, unprotected"  = "#BBBBBB",
+  "Lower richness, protected"    = "#888888"
+)
+
+map3 <- ggplot() +
+  conserved_base +
+  ca_outline_layer +
+  # Render lower-priority cells first so gap cells sit on top
+  geom_sf(
+    data  = bee_gaps |> filter(!rich_gap),
+    aes(color = rich_priority),
+    size  = 1.0, alpha = 0.65, shape = 16
+  ) +
+  geom_sf(
+    data  = bee_gaps |> filter(rich_gap),
+    aes(color = rich_priority),
+    size  = 1.5, alpha = 1.0, shape = 16
+  ) +
+  scale_color_manual(
+    values = gap_colors_rich,
+    name   = NULL,
+    guide  = guide_legend(
+      override.aes   = list(size = 3),
+      nrow           = 2,
+      title.position = "top"
+    )
+  ) +
+  labs(
+    title    = "Conservation Gap: Bee Species Richness",
+    subtitle = glue(
+      "Orange = high richness (≥ {round(rich_thresh,1)} spp) AND outside protected lands  ·  ",
+      "Threshold = {gap_quantile*100}th percentile"
+    )
+  ) +
+  map_theme
+
+map3
+```
+
+------------------------------------------------------------------------
+
+### Map 4 — Conservation Gap: High Endemism, Unprotected
+
+Map 4 mirrors Map 3 but uses CWE as the biodiversity metric. Because CWE
+emphasises range-restricted species rather than total counts, the spatial
+pattern of endemism gaps may differ substantially from richness gaps — areas
+with moderate total richness can still harbour many narrow-range endemics.
+Using the same colour scheme as Map 3 allows direct visual comparison across
+the two gap dimensions.
+
+```{r map-cwe-gap, fig.alt="Conservation gap map showing high bee endemism areas outside GAP 1 & 2 lands"}
+gap_colors_cwe <- c(
+  "High endemism, unprotected"   = "#D55E00",
+  "High endemism, protected"     = "#0072B2",
+  "Lower endemism, unprotected"  = "#BBBBBB",
+  "Lower endemism, protected"    = "#888888"
+)
+
+map4 <- ggplot() +
+  conserved_base +
+  ca_outline_layer +
+  geom_sf(
+    data  = bee_gaps |> filter(!cwe_gap),
+    aes(color = cwe_priority),
+    size  = 1.0, alpha = 0.65, shape = 16
+  ) +
+  geom_sf(
+    data  = bee_gaps |> filter(cwe_gap),
+    aes(color = cwe_priority),
+    size  = 1.5, alpha = 1.0, shape = 16
+  ) +
+  scale_color_manual(
+    values = gap_colors_cwe,
+    name   = NULL,
+    guide  = guide_legend(
+      override.aes   = list(size = 3),
+      nrow           = 2,
+      title.position = "top"
+    )
+  ) +
+  labs(
+    title    = "Conservation Gap: Bee Rarity (CWE)",
+    subtitle = glue(
+      "Orange = high rarity (≥ {round(cwe_thresh,4)} CWE) AND outside protected lands  ·  ",
+      "Threshold = {gap_quantile*100}th percentile"
+    )
+  ) +
+  map_theme
+
+map4
+```
+
+------------------------------------------------------------------------
+
+### Map 5 — Dual-Gap Priority Cells
+
+Map 5 identifies the highest-priority conservation gaps: cells that are
+simultaneously above the richness threshold AND above the endemism threshold
+AND outside GAP 1 & 2 lands. These dual-gap cells represent locations where
+protecting new land would advance two independent conservation objectives at
+once. A five-category palette distinguishes dual-gap cells (red) from
+single-dimension gaps (amber for richness only, sky blue for endemism only),
+already-protected high-diversity cells (teal), and background cells (light
+grey).
+
+```{r map-dual-gap, fig.alt="Map showing cells high in both bee richness and endemism but outside GAP 1 & 2 lands"}
+bee_gaps <- bee_gaps |>
+  mutate(
+    dual_gap = rich_gap & cwe_gap,
+    dual_priority = case_when(
+      dual_gap      ~ "High richness + endemism, unprotected",
+      rich_gap      ~ "High richness only, unprotected",
+      cwe_gap       ~ "High endemism only, unprotected",
+      is_protected  ~ "Protected (GAP 1 & 2)",
+      TRUE          ~ "Lower diversity, unprotected"
+    )
+  )
+
+n_dual <- sum(bee_gaps$dual_gap, na.rm = TRUE)
+message(glue(
+  "{n_dual} cells are high in BOTH richness AND endemism and are unprotected — ",
+  "these are the highest-priority dual conservation gaps."
+))
+
+dual_colors <- c(
+  "High richness + endemism, unprotected" = "#CC0000",
+  "High richness only, unprotected"       = "#E69F00",
+  "High endemism only, unprotected"       = "#56B4E9",
+  "Protected (GAP 1 & 2)"                = "#009E73",
+  "Lower diversity, unprotected"          = "#DDDDDD"
+)
+
+map5 <- ggplot() +
+  conserved_base +
+  ca_outline_layer +
+  # Render from lowest to highest priority so key cells are never occluded
+  geom_sf(
+    data  = bee_gaps |> filter(!rich_gap & !cwe_gap),
+    aes(color = dual_priority),
+    size  = 0.8, alpha = 0.5, shape = 16
+  ) +
+  geom_sf(
+    data  = bee_gaps |> filter(rich_gap | cwe_gap) |> filter(!dual_gap),
+    aes(color = dual_priority),
+    size  = 1.2, alpha = 0.8, shape = 16
+  ) +
+  geom_sf(
+    data  = bee_gaps |> filter(dual_gap),
+    aes(color = dual_priority),
+    size  = 2.0, alpha = 1.0, shape = 16
+  ) +
+  scale_color_manual(
+    values = dual_colors,
+    name   = NULL,
+    guide  = guide_legend(
+      override.aes   = list(size = 3),
+      nrow           = 3,
+      title.position = "top"
+    )
+  ) +
+  labs(
+    title    = "Dual Conservation Gap: High Bee Richness AND Endemism, Unprotected",
+    subtitle = glue(
+      "Red = {n_dual} cells unprotected AND high in both richness ",
+      "(≥{round(rich_thresh,1)} spp) AND endemism (CWE ≥{round(cwe_thresh,4)})  ·  ",
+      "Threshold = {gap_quantile*100}th percentile"
+    )
+  ) +
+  map_theme
+
+map5
+```
+
+------------------------------------------------------------------------
+
+## Summary Statistics
+
+The three tables below quantify the gap patterns shown in Maps 3–5. Because
+these statistics are computed from the same `bee_gaps` object used to generate
+the maps, any change to `gap_quantile` in the `gap-thresholds` chunk
+automatically propagates through both the maps and the summary tables.
+
+### Richness gap
+
+```{r summary-richness}
+bee_gaps |>
+  st_drop_geometry() |>
+  group_by(rich_priority) |>
+  summarise(
+    n_cells         = n(),
+    mean_richness   = round(mean(richness, na.rm = TRUE), 1),
+    median_richness = round(median(richness, na.rm = TRUE), 1)
+  ) |>
+  arrange(desc(mean_richness)) |>
+  knitr::kable(caption = "Bee richness by conservation status")
+```
+
+### Endemism gap
+
+```{r summary-cwe}
+bee_gaps |>
+  st_drop_geometry() |>
+  group_by(cwe_priority) |>
+  summarise(
+    n_cells    = n(),
+    mean_cwe   = round(mean(cwe, na.rm = TRUE), 4),
+    median_cwe = round(median(cwe, na.rm = TRUE), 4)
+  ) |>
+  arrange(desc(mean_cwe)) |>
+  knitr::kable(caption = "Bee endemism (CWE) by conservation status")
+```
+
+### Overlap: cells that are gaps for both richness and endemism
+
+```{r summary-overlap}
+dual_gap <- bee_gaps |>
+  st_drop_geometry() |>
+  filter(rich_gap & cwe_gap)
+
+# cat() is used instead of message() so this count is never suppressed
+# by execute: message: false in the YAML header
+cat(glue(
+  "{nrow(dual_gap)} grid cells are high in BOTH richness AND endemism ",
+  "and fall outside GAP 1 & 2 protected areas — these are the highest-priority gaps.\n"
+))
+
+# A visible summary table ensures this chunk always produces rendered output,
+# preventing Quarto from skipping it in sessions where message() is suppressed
+dual_gap |>
+  summarise(
+    n_dual_gap_cells    = n(),
+    mean_richness       = round(mean(richness, na.rm = TRUE), 1),
+    mean_cwe            = round(mean(cwe, na.rm = TRUE), 4)
+  ) |>
+  knitr::kable(
+    caption   = "Dual-gap cells: high in both richness and endemism, unprotected",
+    col.names = c("Dual-gap cells (n)", "Mean richness", "Mean CWE")
+  )
+```
+
+------------------------------------------------------------------------
+
+## Export Gap Layers
+
+The classified grid is exported as two GeoPackage files for use in QGIS or
+ArcGIS. The full classified grid (`bee_conservation_gaps.gpkg`) retains all
+cells with their gap-status columns. The priority subset
+(`bee_priority_gaps.gpkg`) contains only cells that are a gap on at least one
+biodiversity dimension; this smaller file loads and renders faster in GIS
+software and is suitable for direct use in planning workflows.
+
+```{r export}
+out_dir <- "outputs"
+dir.create(out_dir, showWarnings = FALSE)
+
+st_write(
+  bee_gaps,
+  file.path(out_dir, "bee_conservation_gaps.gpkg"),
+  append = FALSE
+)
+
+priority_gaps <- bee_gaps |>
+  filter(rich_gap | cwe_gap)
+
+st_write(
+  priority_gaps,
+  file.path(out_dir, "bee_priority_gaps.gpkg"),
+  append = FALSE
+)
+
+message(glue(
+  "Exported {nrow(bee_gaps)} classified cells and ",
+  "{nrow(priority_gaps)} priority gap cells to {out_dir}/"
+))
+```
+
+------------------------------------------------------------------------
+
+## Export Manuscript Figures
+
+Maps 3, 4, and 5 (the gap maps) are exported as 600 dpi LZW-compressed TIFF
+files at 174 × 160 mm — a standard two-column figure size for journals such
+as *iScience*, *Oecologia*, and *Diversity and Distributions*. Maps 1 and 2
+(the overlay maps) are supplementary and can be added to this list by
+extending `fig_specs` if needed.
+
+```{r export-figures}
+fig_dir <- file.path("..", "figures")
+dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+
+fig_specs <- list(
+  list(plot = map3, name = "fig3_richness_gap"),
+  list(plot = map4, name = "fig4_cwe_gap"),
+  list(plot = map5, name = "fig5_dual_gap")
+)
+
+for (fig in fig_specs) {
+  ggsave(
+    filename    = file.path(fig_dir, paste0(fig$name, ".tiff")),
+    plot        = fig$plot,
+    width       = 174,
+    height      = 160,
+    units       = "mm",
+    dpi         = 600,
+    compression = "lzw"
+  )
+  message(glue("Saved: {fig$name}.tiff"))
+}
+
+message(glue("All figures exported to: {normalizePath(fig_dir)}"))
+```
+
+------------------------------------------------------------------------
+
+## Data Integrity Validation
+
+This section runs after all analysis chunks have executed. It checks each
+of the thirteen issues identified in the crosscheck review: silent data
+loss, NA propagation, row-count changes across joins, type mismatches,
+geometry validity, CRS consistency, and output visibility. Results are
+collected into a single table so that all issues are visible at once
+rather than stopping on the first failure.
+
+Each check is assigned one of three statuses:
+
+- **FAIL** — a problem that will produce incorrect results and must be
+  resolved before any findings are reported.
+- **WARN** — a condition that may be acceptable but requires a conscious
+  decision; document your reasoning if you proceed.
+- **PASS** — the check found no problem.
+
+The table is rendered twice: as plain text to the console (visible when
+running interactively) and as a formatted HTML table in the rendered
+document. Note that because `execute: message: false` is set in the YAML
+header, `message()` calls elsewhere in the script are suppressed in the
+HTML output; this chunk uses `cat()` for the console summary so it is
+always visible regardless of that setting.
+
+```{r validation, message=TRUE}
+# ==============================================================================
+# DATA INTEGRITY VALIDATION
+# Run this chunk after all preceding chunks have executed successfully.
+# Each check corresponds to a numbered item in the crosscheck list.
+# Results are collected into a summary table printed at the end.
+# A script that passes all checks prints only PASS lines.
+# Any FAIL or WARN line requires investigation before results are reported.
+# ==============================================================================
+
+# ── Helper: collect results rather than stop on first failure ─────────────────
+# Each check appends one row to `checks`: severity, id, description, detail.
+checks <- tibble::tibble(
+  severity    = character(),
+  id          = character(),
+  description = character(),
+  detail      = character()
+)
+
+flag <- function(severity, id, description, detail = "") {
+  checks <<- dplyr::bind_rows(
+    checks,
+    tibble::tibble(
+      severity    = severity,
+      id          = id,
+      description = description,
+      detail      = as.character(detail)
+    )
+  )
+}
+
+pass <- function(id, description, detail = "") flag("PASS", id, description, detail)
+warn <- function(id, description, detail = "") flag("WARN", id, description, detail)
+fail <- function(id, description, detail = "") flag("FAIL", id, description, detail)
+
+# ==============================================================================
+# CHECK 1 — Rows dropped by drop_na() on coordinates (CSV path)
+# We cannot rerun the CSV path here, but we can verify that no NA coordinates
+# survived into bee.data after loading.
+# ==============================================================================
+{
+  n_na_coords <- if (inherits(sf::st_geometry(bee.data), "sfc_POINT")) {
+    coords <- sf::st_coordinates(bee.data)
+    sum(is.na(coords[, 1]) | is.na(coords[, 2]))
+  } else {
+    0L  # polygon geometry: coordinate NAs not directly checkable this way
+  }
+
+  if (n_na_coords > 0) {
+    fail("1-coord-na",
+         "NA coordinates present in bee.data after loading",
+         glue::glue("{n_na_coords} cells have NA x or y — these were or will be dropped"))
+  } else {
+    pass("1-coord-na",
+         "No NA coordinates in bee.data",
+         glue::glue("{nrow(bee.data)} cells loaded"))
+  }
+}
+
+# ==============================================================================
+# CHECK 2 — NA values in richness and cwe
+# NA richness/cwe causes case_when() to silently assign cells to the catch-all
+# category ("Lower richness, protected") regardless of actual protection status.
+# ==============================================================================
+{
+  n_na_rich <- sum(is.na(bee_prot$richness))
+  n_na_cwe  <- sum(is.na(bee_prot$cwe))
+
+  if (n_na_rich > 0) {
+    fail("2-na-richness",
+         "NA values in richness column of bee_prot",
+         glue::glue("{n_na_rich} cells — silently misclassified by case_when()"))
+  } else {
+    pass("2-na-richness", "No NA values in richness",
+         glue::glue("n = {nrow(bee_prot)}"))
+  }
+
+  if (n_na_cwe > 0) {
+    fail("2-na-cwe",
+         "NA values in cwe column of bee_prot",
+         glue::glue("{n_na_cwe} cells — silently misclassified by case_when()"))
+  } else {
+    pass("2-na-cwe", "No NA values in cwe",
+         glue::glue("n = {nrow(bee_prot)}"))
+  }
+
+  # Secondary: confirm gap flags contain no NAs (NA propagation reached bee_gaps)
+  n_na_rich_gap <- sum(is.na(bee_gaps$rich_gap))
+  n_na_cwe_gap  <- sum(is.na(bee_gaps$cwe_gap))
+
+  if (n_na_rich_gap > 0 || n_na_cwe_gap > 0) {
+    fail("2-na-gap-flags",
+         "NA values in rich_gap or cwe_gap in bee_gaps",
+         glue::glue("rich_gap NAs: {n_na_rich_gap}, cwe_gap NAs: {n_na_cwe_gap}"))
+  } else {
+    pass("2-na-gap-flags", "No NA values in rich_gap or cwe_gap")
+  }
+}
+
+# ==============================================================================
+# CHECK 3 — Row count preserved by spatial-join deduplication
+# bee_prot should have exactly the same number of rows as bee.data.
+# Any excess indicates that slice(1) silently discarded duplicate matches.
+# ==============================================================================
+{
+  n_bee_data <- nrow(bee.data)
+  n_bee_prot <- nrow(bee_prot)
+
+  if (n_bee_prot != n_bee_data) {
+    fail("3-join-dedup",
+         "Row count changed after spatial-join deduplication",
+         glue::glue("bee.data: {n_bee_data} rows, bee_prot: {n_bee_prot} rows — ",
+                    "difference: {n_bee_prot - n_bee_data}"))
+  } else {
+    pass("3-join-dedup",
+         "Row count unchanged after spatial join",
+         glue::glue("{n_bee_prot} rows in bee_prot == {n_bee_data} rows in bee.data"))
+  }
+}
+
+# ==============================================================================
+# CHECK 4 — Gap1_acres and Gap2_acres column types in conserved
+# If stored as character, the filter (> 0) evaluates to NA, not FALSE, and
+# conserved_gap12 may be empty without any error.
+# ==============================================================================
+{
+  cls_gap1 <- class(conserved$Gap1_acres)
+  cls_gap2 <- class(conserved$Gap2_acres)
+  numeric_classes <- c("numeric", "integer", "double")
+
+  if (!cls_gap1 %in% numeric_classes) {
+    fail("4-acres-type",
+         "Gap1_acres is not numeric — filter(Gap1_acres > 0) may have failed silently",
+         glue::glue("class: {cls_gap1}"))
+  } else if (!cls_gap2 %in% numeric_classes) {
+    fail("4-acres-type",
+         "Gap2_acres is not numeric — filter(Gap2_acres > 0) may have failed silently",
+         glue::glue("class: {cls_gap2}"))
+  } else {
+    pass("4-acres-type",
+         "Gap1_acres and Gap2_acres are numeric",
+         glue::glue("classes: {cls_gap1}, {cls_gap2}"))
+  }
+
+  # Secondary: conserved_gap12 must be non-empty
+  if (nrow(conserved_gap12) == 0) {
+    fail("4-gap12-empty",
+         "conserved_gap12 is empty — no GAP 1 or 2 polygons found",
+         "Check column names and types in the 30x30 shapefile")
+  } else {
+    pass("4-gap12-empty",
+         "conserved_gap12 is non-empty",
+         glue::glue("{nrow(conserved_gap12)} polygons with GAP 1 or 2 acreage"))
+  }
+}
+
+# ==============================================================================
+# CHECK 5 — Zero or degenerate cell areas in sensitivity analysis
+# overlap_area is computed by calling sf::st_area() directly on
+# bee_gap12_intersections (assigned via $<- before the summarise pipe).
+# If any bee_cells polygon is degenerate (area = 0), dividing overlap_area
+# by cell_area produces NaN, which sum(..., na.rm = TRUE) silently excludes
+# from gap counts — understating the number of unprotected cells.
+# ==============================================================================
+{
+  if (exists("bee_cells") && "cell_area" %in% names(bee_cells)) {
+    n_zero_area <- sum(bee_cells$cell_area == 0, na.rm = TRUE)
+    n_na_area   <- sum(is.na(bee_cells$cell_area))
+
+    if (n_zero_area > 0) {
+      fail("5-zero-area",
+           "Degenerate polygons with cell_area == 0 in bee_cells",
+           glue::glue("{n_zero_area} cells — overlap_prop will be NaN for these"))
+    } else {
+      pass("5-zero-area", "No zero-area cells in bee_cells")
+    }
+
+    if (n_na_area > 0) {
+      fail("5-na-area",
+           "NA values in cell_area in bee_cells",
+           glue::glue("{n_na_area} cells"))
+    } else {
+      pass("5-na-area", "No NA values in cell_area in bee_cells")
+    }
+
+    # Check for NaN in overlap_prop — the downstream symptom of a zero cell_area.
+    # st_area() is called on bee_gap12_intersections directly (not inside mutate),
+    # so the area values themselves should always be non-negative numerics;
+    # NaN here means cell_area was zero, not that st_area() failed.
+    if (exists("bee_overlap") && "overlap_prop" %in% names(bee_overlap)) {
+      n_nan_prop <- sum(is.nan(sf::st_drop_geometry(bee_overlap)$overlap_prop))
+      if (n_nan_prop > 0) {
+        fail("5-nan-overlap-prop",
+             "NaN values in overlap_prop in bee_overlap",
+             glue::glue("{n_nan_prop} cells — caused by division by zero cell_area"))
+      } else {
+        pass("5-nan-overlap-prop", "No NaN values in overlap_prop")
+      }
+    }
+  } else {
+    warn("5-zero-area",
+         "bee_cells or cell_area not found — sensitivity chunk may not have run",
+         "Skipping check 5")
+  }
+}
+
+# ==============================================================================
+# CHECK 6 — CRS of bee.data and conserved_union
+# Both must be EPSG 3310 (CA Albers) for the spatial join to be valid.
+# ==============================================================================
+{
+  epsg_bee <- sf::st_crs(bee.data)$epsg
+
+  if (is.na(epsg_bee)) {
+    warn("6-crs-bee",
+         "bee.data CRS has no EPSG code — cannot confirm EPSG 3310",
+         glue::glue("CRS string: {sf::st_crs(bee.data)$input}"))
+  } else if (epsg_bee != 3310L) {
+    fail("6-crs-bee",
+         "bee.data is not in CA Albers (EPSG 3310) after st_transform",
+         glue::glue("Detected EPSG: {epsg_bee}"))
+  } else {
+    pass("6-crs-bee", "bee.data CRS confirmed as EPSG 3310 (CA Albers)")
+  }
+
+  epsg_union <- sf::st_crs(conserved_union)$epsg
+  if (!isTRUE(epsg_union == 3310L)) {
+    fail("6-crs-union",
+         "conserved_union is not in EPSG 3310",
+         glue::glue("Detected EPSG: {epsg_union}"))
+  } else {
+    pass("6-crs-union", "conserved_union CRS confirmed as EPSG 3310")
+  }
+}
+
+# ==============================================================================
+# CHECK 7 — conserved_union geometry is valid and non-empty
+# An empty or invalid dissolve means every bee cell gets is_protected = FALSE.
+# ==============================================================================
+{
+  union_empty <- sf::st_is_empty(conserved_union$geometry)
+  union_valid <- sf::st_is_valid(conserved_union$geometry)
+
+  if (any(union_empty)) {
+    fail("7-union-empty",
+         "conserved_union geometry is empty — all cells will appear unprotected",
+         "st_union() may have failed on invalid input geometries")
+  } else {
+    pass("7-union-empty", "conserved_union geometry is non-empty")
+  }
+
+  if (!all(union_valid)) {
+    fail("7-union-valid",
+         "conserved_union geometry is invalid",
+         "Run st_make_valid(conserved_union) and re-dissolve")
+  } else {
+    pass("7-union-valid", "conserved_union geometry is valid")
+  }
+}
+
+# ==============================================================================
+# CHECK 8 — Row count preserved by left_join in sensitivity chunk
+# bee_overlap must have exactly as many rows as bee_cells.
+# Extra rows mean overlap_by_cell had duplicate cell_ids, inflating gap counts.
+# ==============================================================================
+{
+  if (exists("bee_overlap") && exists("bee_cells")) {
+    n_cells   <- nrow(bee_cells)
+    n_overlap <- nrow(bee_overlap)
+
+    if (n_overlap != n_cells) {
+      fail("8-overlap-rowcount",
+           "Row count changed after left_join in sensitivity chunk",
+           glue::glue("bee_cells: {n_cells} rows, bee_overlap: {n_overlap} rows — ",
+                      "overlap_by_cell may contain duplicate cell_ids"))
+    } else {
+      pass("8-overlap-rowcount",
+           "Row count unchanged after sensitivity left_join",
+           glue::glue("{n_overlap} rows"))
+    }
+  } else {
+    warn("8-overlap-rowcount",
+         "bee_overlap or bee_cells not found — sensitivity chunk may not have run",
+         "Skipping check 8")
+  }
+}
+
+# ==============================================================================
+# CHECK 9 — Sensitivity 0% threshold matches main analysis dual-gap count
+# At 0% overlap, every intersecting cell is "protected" — identical to the
+# is_protected flag from spatial-join. The dual-gap count must therefore
+# equal dual_gap_n. A mismatch signals an artefact between the two pipelines.
+# This was confirmed 8 april 2026 - Gretchen LeBuhn
+# ==============================================================================
+{
+  if (exists("gap_summary_sensitivity") && exists("dual_gap_n")) {
+    sens_dual_0 <- gap_summary_sensitivity |>
+      dplyr::filter(overlap_threshold == 0) |>
+      dplyr::pull(dual_gap_cells)
+
+    if (length(sens_dual_0) == 0) {
+      warn("9-sens-consistency",
+           "Could not find 0% threshold row in gap_summary_sensitivity",
+           "Confirmed 8 apr 2026.  So code changed to not include 0%")
+    } else if (sens_dual_0 != dual_gap_n) {
+      fail("9-sens-consistency",
+           "Dual-gap count at 0% overlap threshold does not match main analysis",
+           glue::glue("Main analysis dual_gap_n: {dual_gap_n}, ",
+                      "Sensitivity at 0%: {sens_dual_0} — ",
+                      "investigate geometry or join differences between pipelines"))
+    } else {
+      pass("9-sens-consistency",
+           "Sensitivity 0% dual-gap count matches main analysis",
+           glue::glue("Both = {dual_gap_n}"))
+    }
+  } else {
+    warn("9-sens-consistency",
+         "gap_summary_sensitivity or dual_gap_n not found",
+         "Skipping check 9 — ensure sensitivity chunk ran after gap-thresholds")
+  }
+}
+
+# ==============================================================================
+# CHECK 10 — YAML execute:message:false suppresses diagnostic output
+# This cannot be tested in R, but is flagged as a reminder so it appears in
+# the validation output and is not overlooked before submission.
+# ==============================================================================
+{
+  warn("10-message-suppressed",
+       "YAML execute: message: false suppresses all message() output in rendered HTML",
+       paste0("Verify counts manually before submission, or use message: true ",
+              "during review and cat() for counts that must appear in the final document"))
+}
+
+# ==============================================================================
+# CHECK 11 — Multiple shapefiles in the conserved areas zip
+# If > 1 .shp was found, conserved_path[1] was used silently.
+# ==============================================================================
+{
+  if (exists("conserved_dir") && dir.exists(conserved_dir)) {
+    all_shp <- list.files(
+      conserved_dir,
+      pattern     = "\\.shp$",
+      full.names  = TRUE,
+      recursive   = TRUE,
+      ignore.case = TRUE
+    )
+    if (length(all_shp) > 1) {
+      warn("11-multi-shp",
+           "Multiple .shp files found in zip — only the first was read",
+           glue::glue("Files: {paste(basename(all_shp), collapse = ', ')}"))
+    } else if (length(all_shp) == 1) {
+      pass("11-multi-shp",
+           "Exactly one .shp file in conserved areas zip",
+           glue::glue("File: {basename(all_shp)}"))
+    } else {
+      warn("11-multi-shp",
+           "No .shp files found when rechecking conserved_dir",
+           "Temp directory may have been cleaned; verify manually")
+    }
+  } else {
+    warn("11-multi-shp",
+         "Temp directory conserved_dir no longer exists — cannot recheck zip contents",
+         "Acceptable if tempfiles were cleaned; verify manually if in doubt")
+  }
+}
+
+# ==============================================================================
+# CHECK 12 — Double-counting of acres where both Gap1_acres and Gap2_acres > 0
+# Affects only the summary message, not the analysis, but flags for awareness.
+# ==============================================================================
+{
+  n_both <- sum(
+    conserved_gap12$Gap1_acres > 0 & conserved_gap12$Gap2_acres > 0,
+    na.rm = TRUE
+  )
+  if (n_both > 0) {
+    warn("12-acres-double",
+         "Parcels with both Gap1_acres > 0 and Gap2_acres > 0 exist",
+         glue::glue("{n_both} parcels — the GAP 1 & 2 acreage summary message ",
+                    "may overstate protected area. Analysis unaffected."))
+  } else {
+    pass("12-acres-double",
+         "No parcels with both Gap1_acres and Gap2_acres > 0",
+         "Acreage summary message is not double-counting")
+  }
+}
+
+# ==============================================================================
+# CHECK 13 — dual_gap object exists and count matches gap-thresholds
+# The summary-overlap chunk creates dual_gap and reports its count via cat()
+# (not message(), which is suppressed by execute: message: false) and renders
+# a knitr::kable() to ensure the chunk always produces visible output.
+# A mismatch in counts signals that bee_gaps was modified between chunks.
+# ==============================================================================
+{
+  if (!exists("dual_gap")) {
+    fail("13-dual-gap-exists",
+         "Object 'dual_gap' not found — summary-overlap chunk did not run",
+         paste0("The chunk now uses cat() and knitr::kable() to force visible output. ",
+                "If dual_gap is still missing, check for an error in that chunk."))
+  } else {
+    n_dual_overlap <- nrow(dual_gap)
+    if (n_dual_overlap != dual_gap_n) {
+      fail("13-dual-gap-count",
+           "dual_gap row count does not match dual_gap_n from gap-thresholds",
+           glue::glue("dual_gap rows: {n_dual_overlap}, dual_gap_n: {dual_gap_n} — ",
+                      "bee_gaps may have been modified between the two chunks"))
+    } else {
+      pass("13-dual-gap-count",
+           "dual_gap exists and count matches gap-thresholds",
+           glue::glue("n = {n_dual_overlap}"))
+    }
+  }
+}
+
+# ==============================================================================
+# SUMMARY TABLE
+# ==============================================================================
+
+# ── Console output (always visible, not affected by message: false) ────────────
+cat("\n")
+cat("=======================================================================\n")
+cat("  DATA INTEGRITY VALIDATION SUMMARY\n")
+cat("=======================================================================\n\n")
+
+n_fail <- sum(checks$severity == "FAIL")
+n_warn <- sum(checks$severity == "WARN")
+n_pass <- sum(checks$severity == "PASS")
+
+ordered_checks <- dplyr::bind_rows(
+  dplyr::filter(checks, severity == "FAIL"),
+  dplyr::filter(checks, severity == "WARN"),
+  dplyr::filter(checks, severity == "PASS")
+)
+
+for (i in seq_len(nrow(ordered_checks))) {
+  row <- ordered_checks[i, ]
+  prefix <- switch(row$severity,
+    "FAIL" = "[ FAIL ]",
+    "WARN" = "[ WARN ]",
+    "PASS" = "[ pass ]"
+  )
+  cat(sprintf("%-10s  %s — %s\n", prefix, row$id, row$description))
+  if (nchar(row$detail) > 0) {
+    detail_wrapped <- strwrap(row$detail, width = 68,
+                              prefix = "             ")
+    cat(paste(detail_wrapped, collapse = "\n"), "\n")
+  }
+  cat("\n")
+}
+
+cat("-----------------------------------------------------------------------\n")
+cat(sprintf("  %d FAIL   %d WARN   %d pass   (%d checks total)\n\n",
+            n_fail, n_warn, n_pass, nrow(checks)))
+
+if (n_fail > 0) {
+  cat("  ACTION REQUIRED: resolve all FAIL items before reporting results.\n")
+} else if (n_warn > 0) {
+  cat("  Review WARN items and confirm they are acceptable before submission.\n")
+} else {
+  cat("  All checks passed. Proceed to submission.\n")
+}
+cat("=======================================================================\n\n")
+
+# ── HTML table (rendered document) ────────────────────────────────────────────
+# Row indices for conditional colouring must be computed on the ordered frame
+fail_rows <- which(ordered_checks$severity == "FAIL")
+warn_rows <- which(ordered_checks$severity == "WARN")
+
+ordered_checks |>
+  dplyr::select(severity, id, description, detail) |>
+  knitr::kable(
+    caption   = "Data integrity validation results",
+    col.names = c("Status", "Check ID", "Description", "Detail"),
+    align     = c("c", "l", "l", "l")
+  ) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "condensed", "bordered"),
+    full_width        = TRUE,
+    font_size         = 11
+  ) |>
+  kableExtra::row_spec(fail_rows, background = "#fde8e8", bold = TRUE) |>
+  kableExtra::row_spec(warn_rows, background = "#fff8e1")
+```
+
+------------------------------------------------------------------------
+
+## Notes on the 30×30 Conserved Areas Data
+
+The Terrestrial 30×30 Conserved Areas layer (CA Nature, 2024) integrates:
+
+- **CPAD** (California Protected Areas Database, GreenInfo Network)
+- **CCED** (California Conservation Easement Database, GreenInfo Network)
+- **PAD-US** (USGS Gap Analysis Project) for GAP status coding
+
+GAP status was assigned using an 80% areal overlap rule at the Superunit
+level. Areas with less than 80% overlap with any single GAP code were resolved
+at the Holdings level. Remaining uncoded areas were assigned GAP 4.
+
+Layer citation: *California Protected Areas Database (CPAD). December 2024.
+GreenInfo Network. www.calands.org*
