@@ -676,7 +676,7 @@ dual_gap |>
 
 ------------------------------------------------------------------------
 
-## Sensitivity Analysis: Areal Overlap Thresholds
+## Sensitivity Analysis: Area Overlap Thresholds
 
 The main analysis classifies a cell as "protected" if it intersects GAP 1 & 2 land at all (any overlap). In practice a cell might overlap only at a corner. This section tests gap counts under stricter minimum areal overlap thresholds (10%, 25%, 50%, 75%).
 
@@ -844,6 +844,86 @@ knitr::kable(
   )
 ```
 
+```{r richness by threshold}
+#| label: table2-richness-by-threshold
+
+# Build richness summary by priority group under each overlap threshold,
+# mirroring the structure of the main table1-richness-summary chunk.
+
+richness_sensitivity <- map_dfr(overlap_thresholds, function(thresh) {
+  bee_overlap |>
+    st_drop_geometry() |>
+    mutate(
+      is_protected_thresh = overlap_prop >= thresh,
+      rich_gap_thresh     = richness >= rich_thresh & !is_protected_thresh,
+      cwe_gap_thresh      = cwe      >= cwe_thresh  & !is_protected_thresh,
+      rich_priority = case_when(
+        rich_gap_thresh & cwe_gap_thresh  ~ "Unprotected Dual gap (richness + endemism)",
+        rich_gap_thresh & !cwe_gap_thresh ~ "Unprotected Richness gap only",
+        !rich_gap_thresh & cwe_gap_thresh ~ "Unprotected Endemism gap only",
+        is_protected_thresh               ~ "Protected",
+        TRUE                              ~ "Unprotected low diverstiy"
+      )
+    ) |>
+    group_by(rich_priority) |>
+    summarise(
+      overlap_threshold   = thresh,
+      threshold_label     = scales::percent(thresh, accuracy = 1),
+      n_cells             = n(),
+      mean_richness       = round(mean(richness,   na.rm = TRUE), 1),
+      median_richness     = round(median(richness, na.rm = TRUE), 1),
+      mean_cwe            = round(mean(cwe,        na.rm = TRUE), 4),
+      median_cwe          = round(median(cwe,      na.rm = TRUE), 4),
+      .groups = "drop"
+    )
+}) |>
+   arrange(overlap_threshold, desc(rich_priority == "Protected"), desc(mean_richness))
+
+# Display as a grouped kable — one section per threshold.
+richness_sensitivity |>
+  select(
+    `Overlap threshold`  = threshold_label,
+    `Priority group`     = rich_priority,
+    `N cells`            = n_cells,
+    `Mean richness`      = mean_richness,
+    `Median richness`    = median_richness,
+    `Mean CWE`           = mean_cwe,
+    `Median CWE`         = median_cwe
+  ) |>
+  knitr::kable(
+    caption = paste0(
+      "Table S2. Bee species richness and corrected weighted endemism (CWE) ",
+      "by conservation priority group, across overlap thresholds. ",
+      "Priority groups are defined relative to each threshold's protected classification. ",
+      "'Dual gap' = high richness AND high endemism, unprotected. ",
+      "'Richness gap only' = high richness, unprotected, low endemism. ",
+      "'Endemism gap only' = high endemism, unprotected, low richness."
+    ),
+    align       = c("r", "l", rep("r", 5)),
+    format.args = list(big.mark = ",")
+  ) |>
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "bordered"),
+    full_width        = TRUE,
+    font_size         = 12
+  ) |>
+  add_header_above(
+    c(" " = 2, "Cell count" = 1, "Richness" = 2, "CWE" = 2),
+    bold = TRUE
+  ) |>
+  row_spec(0, bold = TRUE) |>
+  collapse_rows(columns = 1, valign = "top") |>
+  kableExtra::footnote(
+    general = paste0(
+      "Richness threshold: ≥ ", round(rich_thresh, 1), " spp (75th percentile). ",
+      "CWE threshold: ≥ ", round(cwe_thresh, 4), " (75th percentile). ",
+      "Each threshold section re-classifies cells independently."
+    ),
+    general_title     = "Note:",
+    footnote_as_chunk = TRUE
+  )
+```
+
 ### Export Table S1
 
 ```{r}
@@ -861,6 +941,154 @@ write.csv(
 # The CSV can be opened in Word or Excel and formatted with a journal table
 # style. The styled HTML version above serves as the analytical record.
 message("Table S1 exported to figures/table_S1_sensitivity.csv")
+```
+
+```{r}
+
+#| label: tableS2-richness-export
+#| message: false
+
+library(flextable)
+library(officer)
+
+# ── Build the data ────────────────────────────────────────────────────────────
+richness_sensitivity_export <- map_dfr(overlap_thresholds, function(thresh) {
+  bee_overlap |>
+    st_drop_geometry() |>
+    mutate(
+      is_protected_thresh = overlap_prop >= thresh,
+      rich_gap_thresh     = richness >= rich_thresh & !is_protected_thresh,
+      cwe_gap_thresh      = cwe      >= cwe_thresh  & !is_protected_thresh,
+      rich_priority = case_when(
+        is_protected_thresh               ~ "Protected",
+        rich_gap_thresh & cwe_gap_thresh  ~ "Dual gap (richness + endemism)",
+        rich_gap_thresh & !cwe_gap_thresh ~ "Richness gap only",
+        !rich_gap_thresh & cwe_gap_thresh ~ "Endemism gap only",
+        TRUE                              ~ "Neither gap"
+      )
+    ) |>
+    group_by(rich_priority) |>
+    summarise(
+      overlap_threshold = thresh,
+      threshold_label   = scales::percent(thresh, accuracy = 1),
+      n_cells           = n(),
+      mean_richness     = round(mean(richness,   na.rm = TRUE), 1),
+      median_richness   = round(median(richness, na.rm = TRUE), 1),
+      mean_cwe          = round(mean(cwe,        na.rm = TRUE), 4),
+      median_cwe        = round(median(cwe,      na.rm = TRUE), 4),
+      .groups = "drop"
+    )
+}) |>
+  arrange(overlap_threshold,
+          desc(rich_priority == "Protected"),
+          desc(mean_richness)) |>
+  select(
+    `Overlap threshold` = threshold_label,
+    `Priority group`    = rich_priority,
+    `N cells`           = n_cells,
+    `Mean richness`     = mean_richness,
+    `Median richness`   = median_richness,
+    `Mean CWE`          = mean_cwe,
+    `Median CWE`        = median_cwe
+  )
+
+# ── Build flextable ───────────────────────────────────────────────────────────
+# Identify which rows start a new threshold block for spanning
+threshold_groups <- richness_sensitivity_export |>
+  mutate(row = row_number()) |>
+  group_by(`Overlap threshold`) |>
+  summarise(start = min(row), end = max(row), .groups = "drop")
+
+ft <- flextable(richness_sensitivity_export) |>
+
+  # Merge repeated threshold labels in column 1
+  merge_v(j = "Overlap threshold") |>
+
+  # Header grouping
+  add_header_row(
+    values = c("", "Cell count", "Species richness", "Endemism (CWE)"),
+    colwidths = c(2, 1, 2, 2)
+  ) |>
+
+  # Alignment
+  align(align = "center", part = "header") |>
+  align(j = 1:2, align = "left",   part = "body") |>
+  align(j = 3:7, align = "center", part = "body") |>
+
+  # Font — Times New Roman is standard for ecology journals
+  font(fontname = "Times New Roman", part = "all") |>
+  fontsize(size = 10, part = "all") |>
+  fontsize(size = 10, part = "header") |>
+
+  # Bold header rows
+  bold(part = "header") |>
+
+  # Horizontal rules: thick top and bottom, thin below column headers
+  hline_top(border = fp_border(width = 1.5), part = "header") |>
+  hline(i = 1, border = fp_border(width = 0.75), part = "header") |>
+  hline_bottom(border = fp_border(width = 1.5), part = "body") |>
+
+  # Light shading on "Protected" rows for visual separation
+  bg(
+    i   = ~ `Priority group` == "Protected",
+    j   = 1:7,
+    bg  = "#F0F0F0",
+    part = "body"
+  ) |>
+
+  # Thin horizontal lines between threshold blocks
+  hline(
+    i      = threshold_groups$end[-nrow(threshold_groups)],
+    border = fp_border(width = 0.75, style = "dashed"),
+    part   = "body"
+  ) |>
+
+  # No vertical borders (standard for ecology journals)
+  border_remove() |>
+  hline_top(border = fp_border(width = 1.5), part = "header") |>
+  hline(i = 1, border = fp_border(width = 0.75), part = "header") |>
+  hline_bottom(border = fp_border(width = 1.5), part = "body") |>
+  hline(
+    i      = threshold_groups$end[-nrow(threshold_groups)],
+    border = fp_border(width = 0.75, style = "dashed"),
+    part   = "body"
+  ) |>
+
+  # Column widths (inches) — fits US Letter with 1" margins
+  width(j = 1, width = 0.9) |>
+  width(j = 2, width = 2.2) |>
+  width(j = 3, width = 0.7) |>
+  width(j = 4:5, width = 0.85) |>
+  width(j = 6:7, width = 0.85) |>
+
+  # Row padding
+  padding(padding.top = 3, padding.bottom = 3, part = "all") |>
+
+  # Caption
+  set_caption(
+    caption = paste0(
+      "Table S2. Bee species richness and corrected weighted endemism (CWE) by ",
+      "conservation priority group across minimum areal overlap thresholds. ",
+      "A cell is classified as \u2018Protected\u2019 only if the stated proportion ",
+      "of its 15 \u00d7 15 km area overlaps GAP Status 1 or 2 lands. ",
+      "Richness threshold: \u2265 ", round(rich_thresh, 1), " spp (75th percentile). ",
+      "CWE threshold: \u2265 ", round(cwe_thresh, 4), " (75th percentile). ",
+      "Dual gap = high in both richness and endemism, unprotected."
+    ),
+    autonum = run_autonum(seq_id = "tab", bkm = "tableS2")
+  )
+
+# ── Display in document ───────────────────────────────────────────────────────
+ft
+
+# ── Export to .docx ───────────────────────────────────────────────────────────
+doc <- read_docx() |>
+  body_add_par("", style = "Normal") |>   # breathing room before table
+  body_add_flextable(ft)
+
+save_docx_path <- file.path("..", "figures", "table_S2_richness_by_threshold.docx")
+print(doc, target = save_docx_path)
+message("Table S2 exported to figures/table_S2_richness_by_threshold.docx")
 ```
 
 ------------------------------------------------------------------------

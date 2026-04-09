@@ -1,0 +1,21 @@
+"rich_priority","overlap_threshold","threshold_label","n_cells","mean_richness","median_richness","mean_cwe","median_cwe"
+"Protected",0.1,"10%",1002,33.2,17,0.0322,0.0236
+"Unprotected Dual gap (richness + endemism)",0.1,"10%",41,86.3,68,0.0529,0.0499
+"Unprotected Richness gap only",0.1,"10%",90,63.6,58,0.024,0.0235
+"Unprotected Endemism gap only",0.1,"10%",106,12.7,10.5,0.0896,0.0594
+"Unprotected low diverstiy",0.1,"10%",440,10.7,8,0.0151,0.0139
+"Protected",0.25,"25%",733,34.3,17,0.0336,0.025
+"Unprotected Dual gap (richness + endemism)",0.25,"25%",64,85.2,69,0.0541,0.0492
+"Unprotected Richness gap only",0.25,"25%",148,65.7,57.5,0.0241,0.0236
+"Unprotected Endemism gap only",0.25,"25%",137,13,11,0.0885,0.0592
+"Unprotected low diverstiy",0.25,"25%",597,10.8,8,0.015,0.0139
+"Protected",0.5,"50%",484,34.1,16,0.0346,0.0268
+"Unprotected Dual gap (richness + endemism)",0.5,"50%",100,93.3,74,0.0522,0.0468
+"Unprotected Richness gap only",0.5,"50%",183,67.1,57,0.0241,0.0237
+"Unprotected Endemism gap only",0.5,"50%",168,13.5,11.5,0.0898,0.0588
+"Unprotected low diverstiy",0.5,"50%",744,11,8,0.0152,0.0139
+"Protected",0.75,"75%",315,32.8,16,0.0348,0.0284
+"Unprotected Dual gap (richness + endemism)",0.75,"75%",123,93.4,73,0.0515,0.0465
+"Unprotected Richness gap only",0.75,"75%",211,70.5,59,0.0244,0.0239
+"Unprotected Endemism gap only",0.75,"75%",193,13.6,11,0.0909,0.0597
+"Unprotected low diverstiy",0.75,"75%",837,11,8,0.0153,0.014
