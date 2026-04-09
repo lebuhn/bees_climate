@@ -1,0 +1,6 @@
+"Protection threshold","High richness cells (n)","Protected (n)","Unprotected (n)","% Protected","High endemism cells (n)","Protected (n) ","Unprotected (n) ","% Protected ","Dual high cells (n)","Protected (n)  ","Unprotected (n)  ","% Protected  "
+"Any overlap (main analysis)",426,410,16,96.2,420,384,36,91.4,172,167,5,97.1
+"≥10% overlap",426,295,131,69.2,420,273,147,65,172,131,41,76.2
+"≥25% overlap",426,214,212,50.2,420,219,201,52.1,172,108,64,62.8
+"≥50% overlap",426,143,283,33.6,420,152,268,36.2,172,72,100,41.9
+"≥75% overlap",426,92,334,21.6,420,104,316,24.8,172,49,123,28.5
